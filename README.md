@@ -12,7 +12,7 @@ Aseprite's EULA allows compiling the source code for personal use, but not redis
 
 - Hexagonal pointy top tilemap support
 - Hexagonal flat top tilemap support
-- Custom timemap mask
+- Custom tiles mask
 
 
 ![Demo Hexagonal Tilemap Aseprite](docs/media/hex-tilemap-demo.png)
