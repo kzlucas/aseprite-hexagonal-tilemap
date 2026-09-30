@@ -33,6 +33,20 @@ void fill_selection(Image* image,
   if (rc.isEmpty())
     return; // <- There is no intersection between image bounds and mask bounds
 
+  // Hexagonal tiles overlap the bounds of their neighbors, so a tile
+  // is filled only if its center is inside the mask
+  if (grid && grid->isHexagonal()) {
+    const gfx::Rect tiles = grid->canvasToTile(rc);
+    for (int v = tiles.y; v < tiles.y2(); ++v) {
+      for (int u = tiles.x; u < tiles.x2(); ++u) {
+        const gfx::Point center = grid->tileToCanvas(gfx::Point(u, v)) + grid->tileCenter();
+        if (rc.contains(center) && mask->containsPoint(center.x, center.y))
+          put_pixel(image, u, v, color);
+      }
+    }
+    return;
+  }
+
   const LockImageBits<BitmapTraits> maskBits(mask->bitmap(), gfx::Rect(rc).offset(-mask->origin()));
   auto it = maskBits.begin();
 

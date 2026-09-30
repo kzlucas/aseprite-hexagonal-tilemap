@@ -255,6 +255,39 @@ bool DocApi::cropCel(LayerImage* layer, Cel* cel, const gfx::Rect& bounds, const
   //    canvas
   if (trimOutside) {
     Image* image = cel->image();
+
+    // Hexagonal tilemaps are cropped in tiles aligned to the stagger
+    // of the grid (so the rows/columns keep their stagger)
+    if (image && !cel->link() && layer->isTilemap() &&
+        static_cast<LayerTilemap*>(layer)->tileset()->grid().isHexagonal()) {
+      const gfx::Rect canvasBounds = (bounds & cel->bounds());
+      if (canvasBounds.isEmpty())
+        return false;
+
+      doc::Grid grid = static_cast<LayerTilemap*>(layer)->tileset()->grid();
+      grid.origin(cel->position());
+      gfx::Rect tiles = grid.alignTilesToStagger(grid.canvasToTile(canvasBounds));
+      ImageRef newImage(crop_image(image, tiles, notile));
+
+      gfx::Rect trimmed;
+      if (!doc::algorithm::shrink_bounds(newImage.get(), notile, layer, trimmed))
+        return false;
+      // The origin of "newImage" is aligned, so we can align the
+      // trimmed bounds as tiles too
+      trimmed = grid.alignTilesToStagger(trimmed);
+      if (trimmed != newImage->bounds()) {
+        newImage.reset(crop_image(newImage.get(), trimmed, notile));
+        tiles.offset(trimmed.origin());
+      }
+
+      if (!is_same_image(cel->image(), newImage.get()))
+        replaceImage(cel->sprite(), cel->imageRef(), newImage);
+
+      newCelPos = grid.tilemapPosition(tiles.origin()) - bounds.origin();
+      setCelPosition(cel->sprite(), cel, newCelPos.x, newCelPos.y);
+      return true;
+    }
+
     if (image && !cel->link()) {
       gfx::Rect newCelBounds = (bounds & cel->bounds());
 

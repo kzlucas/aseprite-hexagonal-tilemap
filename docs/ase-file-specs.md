@@ -520,6 +520,10 @@ The data of this chunk is as follows:
       PIXEL[]   Compressed Tileset image (see NOTE.3):
                   (Tile Width) x (Tile Height x Number of Tiles)
 
+Hexagonal tilesets (a feature of the `aseprite-custom` fork) keep this
+same chunk, and store their grid settings in the tileset user data
+(see NOTE.7).
+
 ## Notes
 
 ### NOTE.1
@@ -623,6 +627,51 @@ valid for image and tilemap layers. The opacity field only when the
 [main header](#header) "Flags" field has the bit 1 enabled. Both
 fields are valid for group layers too when the same "Flags" field has
 the bit 2.
+
+### NOTE.7
+
+**Hexagonal tilesets** are a feature of the `aseprite-custom` fork,
+not of the official Aseprite. A hexagonal tileset is saved as a
+regular tileset (Tileset Chunk with the tile bounding box as tile
+width/height, and the tilemap cels as regular tilemap cels), plus an
+extension properties map in the User Data Chunk of the tileset. The
+extension ID is registered in the External Files Chunk as usual (type
+2, "Extension name for properties"):
+
+    aseprite-custom/hex-tilemap
+
+This properties map contains:
+
+| Property   | Type            | Description |
+|------------|-----------------|-------------|
+| `version`  | integer         | Version of this map, currently 1. |
+| `type`     | string          | `"pointy"` (rows are staggered) or `"flat"` (columns are staggered). |
+| `parity`   | string          | `"odd"` (odd rows/columns are shifted by half a tile) or `"even"`. |
+| `step`     | integer         | Distance in pixels between rows (pointy) or columns (flat). |
+| `tileSize` | size            | Tile size when the map was saved (to detect resized tilesets). |
+| `mask`     | vector of strings | Optional custom mask: one string per row of the tile, `#` for pixels of the hexagon and `.` for pixels outside. When it's missing, the mask is generated from the size, type and step. |
+
+Integers can be saved with any integer type. Readers must ignore
+unknown properties. Tile images are the full bounding box of the
+hexagon, and pixels outside the mask are transparent.
+
+A tile `(column, row)` of a tilemap cel is placed at this position,
+relative to the cel position:
+
+* pointy: `(column * tileWidth + (row is staggered ? tileWidth/2 : 0), row * step)`
+* flat: `(column * step, row * tileHeight + (column is staggered ? tileHeight/2 : 0))`
+
+A row/column is staggered when its index is odd (parity `"odd"`) or
+even (parity `"even"`). Each canvas pixel belongs to exactly one tile:
+the one whose mask contains it.
+
+Versions of Aseprite without hexagonal tilesets load these files
+without errors, show the tiles in a square grid, and keep the
+extension properties when the file is saved, so the fork loads it as
+a hexagonal tileset again. If the tileset is resized there, the step
+is scaled and the automatic mask is used. When the fork loads the
+file, the properties are removed from the tileset user data and saved
+again from the current grid settings.
 
 ## File Format Changes
 

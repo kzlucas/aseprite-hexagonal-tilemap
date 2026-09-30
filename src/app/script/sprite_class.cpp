@@ -628,8 +628,13 @@ int Sprite_newTileset(lua_State* L)
       if (auto g = may_get_obj<Grid>(L, 2)) {
         grid = *g;
       }
+      // Convert a table (with the fields of a Grid, e.g. a hexagonal
+      // grid, or a Rectangle) into a Grid
+      else if (lua_istable(L, 2)) {
+        grid = convert_args_into_grid(L, 2);
+      }
       // Convert Rectangle into a Grid
-      else if (lua_istable(L, 2) || may_get_obj<gfx::Rect>(L, 2)) {
+      else if (may_get_obj<gfx::Rect>(L, 2)) {
         gfx::Rect rect = convert_args_into_rect(L, 2);
         grid = Grid(rect.size());
         grid.origin(rect.origin());

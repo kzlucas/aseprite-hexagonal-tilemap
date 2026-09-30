@@ -78,7 +78,22 @@ void SelectTileCommand::onExecute(Context* ctx)
   if (m_mode != gen::SelectionMode::DEFAULT)
     mask->copyFrom(doc->mask());
 
-  {
+  // Hexagonal tiles are selected with their shape
+  const doc::Grid grid = writer.site().grid();
+  if (grid.isHexagonal()) {
+    const gfx::Point pos = editor->screenToEditor(editor->mousePosInDisplay());
+    Mask tileMask;
+    for (const gfx::Rect& rc : grid.tileRegionInCanvas(grid.canvasToTile(pos)))
+      tileMask.add(rc);
+
+    switch (m_mode) {
+      case gen::SelectionMode::DEFAULT:
+      case gen::SelectionMode::ADD:       mask->add(tileMask); break;
+      case gen::SelectionMode::SUBTRACT:  mask->subtract(tileMask); break;
+      case gen::SelectionMode::INTERSECT: mask->intersect(tileMask); break;
+    }
+  }
+  else {
     gfx::Rect gridBounds = writer.site().gridBounds();
     gfx::Point pos = editor->screenToEditor(editor->mousePosInDisplay());
     pos = snap_to_grid(gridBounds, pos, PreferSnapTo::BoxOrigin);

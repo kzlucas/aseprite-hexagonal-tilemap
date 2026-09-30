@@ -1255,6 +1255,21 @@ void Render::renderCel(Image* dst_image,
     if (!tileset)
       return;
 
+    // Hexagonal tiles overlap, they are composed in a regular image
+    // first so they are rendered like any other cel at any zoom level.
+    if (grid.isHexagonal() && dst_image->pixelFormat() != IMAGE_TILEMAP) {
+      renderHexTilemap(dst_image,
+                       cel_image,
+                       tileset,
+                       grid,
+                       pal,
+                       area,
+                       compositeImage,
+                       opacity,
+                       blendMode);
+      return;
+    }
+
     gfx::Rect tilesToDraw = grid.canvasToTile(m_proj.remove(gfx::Rect(area.src, area.size)));
 
     int yPixelsPerTile = m_proj.applyY(grid.tileSize().h);
@@ -1322,6 +1337,51 @@ void Render::renderCel(Image* dst_image,
   else {
     renderImage(dst_image, cel_image, pal, celBounds, area, compositeImage, opacity, blendMode);
   }
+}
+
+void Render::renderHexTilemap(Image* dst_image,
+                              const Image* cel_image,
+                              const Tileset* tileset,
+                              const Grid& grid,
+                              const Palette* pal,
+                              const gfx::Clip& area,
+                              CompositeImageFunc compositeImage,
+                              const int opacity,
+                              const BlendMode blendMode)
+{
+  // Canvas area to render (with a margin for the rounding of the
+  // projection) inside the tilemap bounds
+  const gfx::Rect celBounds(grid.origin(), grid.tilemapSizeToCanvas(cel_image->size()));
+  gfx::Rect bounds = m_proj.remove(gfx::Rect(area.src, area.size));
+  bounds.enlarge(1);
+  bounds &= celBounds;
+  if (bounds.isEmpty())
+    return;
+
+  // The composed image must start at a multiple of the zoom
+  // denominator from the cel position, so its pixels are sampled
+  // exactly like the pixels of a regular cel (zoom levels are 1/n or
+  // n/1).
+  const int period = std::max(1, m_proj.zoom().remove(1));
+  const int x1 = bounds.x2();
+  const int y1 = bounds.y2();
+  bounds.x -= (((bounds.x - celBounds.x) % period) + period) % period;
+  bounds.y -= (((bounds.y - celBounds.y) % period) + period) % period;
+  bounds.w = x1 - bounds.x;
+  bounds.h = y1 - bounds.y;
+
+  const ImageRef canvas = compose_hex_tilemap(cel_image, tileset, grid, bounds);
+  if (!canvas)
+    return;
+
+  renderImage(dst_image,
+              canvas.get(),
+              pal,
+              gfx::RectF(bounds),
+              area,
+              compositeImage,
+              opacity,
+              blendMode);
 }
 
 void Render::renderImage(Image* dst_image,
@@ -1471,6 +1531,67 @@ void composite_image(Image* dst,
   // As the background is not rendered in renderImage(), we don't need
   // to configure the Render instance's BgType.
   Render().renderImage(dst, src, pal, x, y, opacity, blendMode);
+}
+
+ImageRef compose_hex_tilemap(const Image* tilemap,
+                             const Tileset* tileset,
+                             const Grid& grid,
+                             const gfx::Rect& canvasBounds)
+{
+  ASSERT(grid.isHexagonal());
+  if (canvasBounds.isEmpty() || !tileset || tileset->size() == 0)
+    return nullptr;
+
+  const ImageRef emptyTile = tileset->get(0);
+  if (!emptyTile)
+    return nullptr;
+
+  ImageRef canvas(Image::create(emptyTile->pixelFormat(), canvasBounds.w, canvasBounds.h));
+  canvas->setMaskColor(emptyTile->maskColor());
+  clear_image(canvas.get(), canvas->maskColor());
+
+  // Tiles touching the bounds (plus one more tile around them)
+  gfx::Rect tiles = grid.canvasToTile(canvasBounds);
+  tiles.enlarge(1);
+  tiles &= tilemap->bounds();
+
+  const Image* mask = (grid.hasMask() ? grid.mask().get() : nullptr);
+  const gfx::Size tileSize = grid.tileSize();
+
+  // Tiles are composed from top to bottom and left to right, but as
+  // each canvas pixel is taken only from the tile that owns it, the
+  // order doesn't change the result.
+  for (int v = tiles.y; v < tiles.y2(); ++v) {
+    for (int u = tiles.x; u < tiles.x2(); ++u) {
+      const tile_t t = tilemap->getPixel(u, v);
+      if (t == doc::notile)
+        continue;
+
+      const ImageRef tileImage = tileset->get(tile_geti(t));
+      if (!tileImage || tileImage->size() != tileSize)
+        continue;
+
+      const tile_flags tf = tile_getf(t);
+      const gfx::Rect tileBounds = grid.tileBoundsInCanvas(gfx::Point(u, v));
+      const gfx::Rect clip = (tileBounds & canvasBounds);
+      for (int y = clip.y; y < clip.y2(); ++y) {
+        for (int x = clip.x; x < clip.x2(); ++x) {
+          const int lx = x - tileBounds.x;
+          const int ly = y - tileBounds.y;
+          if (mask && !mask->getPixel(lx, ly))
+            continue;
+
+          int sx = ((tf & tile_f_xflip) ? tileSize.w - 1 - lx : lx);
+          int sy = ((tf & tile_f_yflip) ? tileSize.h - 1 - ly : ly);
+          if ((tf & tile_f_dflip) && tileSize.w == tileSize.h)
+            std::swap(sx, sy);
+
+          canvas->putPixel(x - canvasBounds.x, y - canvasBounds.y, tileImage->getPixel(sx, sy));
+        }
+      }
+    }
+  }
+  return canvas;
 }
 
 } // namespace render

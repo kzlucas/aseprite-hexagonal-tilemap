@@ -496,7 +496,13 @@ public:
   void constructor_prologue()
   {
     if (m_pointShape->isFloodFill()) {
-      if (m_tilesMode && !isSelectionToolLoop()) {
+      // The magic wand selects hexagonal tiles (connected with their 6
+      // neighbors) in tiles mode
+      if (m_tilesMode && m_ink->isSelection() && m_grid.isHexagonal() && m_layer &&
+          m_layer->cel(m_frame)) {
+        m_floodfillSrcImage = Image::createCopy(m_layer->cel(m_frame)->image());
+      }
+      else if (m_tilesMode && !isSelectionToolLoop()) {
         // This will be set later to getSrcImage()
         m_floodfillSrcImage = nullptr;
       }
@@ -634,6 +640,11 @@ public:
     }
 
     m_previewFilled = m_toolPref.filledPreview();
+    // Hexagonal tiles are selected if their center is inside the
+    // selected area, so the preview must fill the area (the outline
+    // of the area doesn't touch the center of all the tiles)
+    if (m_tilesMode && isSelectionPreview && m_grid.isHexagonal())
+      m_previewFilled = true;
     m_sprayWidth = m_toolPref.spray.width();
     m_spraySpeed = m_toolPref.spray.speed();
 
@@ -656,6 +667,25 @@ public:
     // match the new temporal cel position (m_celOrigin).
     m_grid = m_expandCelCanvas->getGrid();
     m_celOrigin = m_expandCelCanvas->getCelOrigin();
+
+    // The magic wand floods a copy of the hexagonal tilemap (see
+    // constructor_prologue()), and its tiles must be in the
+    // coordinates of the new grid
+    if (m_floodfillSrcImage && m_floodfillSrcImage != getSrcImage() &&
+        m_floodfillSrcImage->pixelFormat() == IMAGE_TILEMAP && m_grid.isHexagonal()) {
+      const gfx::Point offset = m_grid.originToTile(m_layer->cel(m_frame)->position());
+      if (offset != gfx::Point(0, 0)) {
+        ASSERT(offset.x >= 0 && offset.y >= 0);
+        Image* tiles = Image::create(IMAGE_TILEMAP,
+                                     offset.x + m_floodfillSrcImage->width(),
+                                     offset.y + m_floodfillSrcImage->height());
+        tiles->setMaskColor(doc::notile);
+        tiles->clear(doc::notile);
+        tiles->copy(m_floodfillSrcImage, gfx::Clip(offset, m_floodfillSrcImage->bounds()));
+        delete m_floodfillSrcImage;
+        m_floodfillSrcImage = tiles;
+      }
+    }
 
     constructor_epilogue();
   }
@@ -903,6 +933,10 @@ tools::ToolLoop* create_tool_loop(Editor* editor,
     params.tool = App::instance()->toolBox()->getToolById(
       tools::WellKnownTools::RectangularMarquee);
     params.ink = params.tool->getInk(button == tools::Pointer::Left ? 0 : 1);
+
+    // Hexagonal tiles are selected in tiles mode (with their shape)
+    if (grid.isHexagonal())
+      site.tilemapMode(TilemapMode::Tiles);
   }
 
   // For selection tools, we can use any layer (even without layers at

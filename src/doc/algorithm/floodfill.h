@@ -14,6 +14,7 @@
 
 namespace doc {
 
+class Grid;
 class Image;
 class Mask;
 
@@ -31,7 +32,21 @@ void floodfill(const Image* image,
                void* data,
                AlgoHLine proc);
 
-}
+// Fills the contiguous tiles of a tilemap in a hexagonal grid (with
+// the 6 neighbors of each tile, see hex_neighbors()) starting at the
+// tile x, y with the same value. "grid" places the tiles of the
+// tilemap in the canvas: if "mask" isn't nullptr, only tiles with
+// their center inside the mask are filled. "proc" is called for each
+// filled tile (a line of one tile).
+void hex_floodfill(const Image* tilemap,
+                   const Grid& grid,
+                   const Mask* mask,
+                   const int x,
+                   const int y,
+                   void* data,
+                   AlgoHLine proc);
+
+} // namespace algorithm
 } // namespace doc
 
 #endif

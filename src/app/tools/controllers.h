@@ -198,7 +198,7 @@ public:
     stroke.addPoint(pt);
     stroke.addPoint(pt);
 
-    if (loop->isSelectingTiles())
+    if (loop->isSelectingTiles() || isSelectingHexTiles(loop))
       snapPointsToGridTiles(loop, stroke);
   }
 
@@ -305,8 +305,12 @@ public:
       stroke[1].y = m_first.y + ry;
     }
 
+    // Hexagonal tiles are selected by their centers
+    if (isSelectingHexTiles(loop)) {
+      snapPointsToGridTiles(loop, stroke);
+    }
     // Adjust points for selection like tools (so we can select tiles)
-    if (loop->getController()->canSnapToGrid() && loop->getSnapToGrid()) {
+    else if (loop->getController()->canSnapToGrid() && loop->getSnapToGrid()) {
       auto bounds = loop->getBrush()->bounds();
 
       if (loop->isSelectingTiles()) {
@@ -378,8 +382,29 @@ public:
   int getCornerRadius() const override { return m_cornerRadius.radius(); }
 
 private:
+  // True if we are selecting hexagonal tiles in tiles mode
+  static bool isSelectingHexTiles(ToolLoop* loop)
+  {
+    return (loop->isTilemapMode() && loop->getGrid().isHexagonal() &&
+            loop->getInk()->isSelection());
+  }
+
   void snapPointsToGridTiles(ToolLoop* loop, Stroke& stroke)
   {
+    // Hexagonal tiles: the points are moved to the centers of the
+    // hexagons under them, so the tiles with their centers inside
+    // the rectangle are selected (a click selects one tile)
+    const doc::Grid& docGrid = loop->getGrid();
+    if (docGrid.isHexagonal()) {
+      for (int i = 0; i < 2; ++i) {
+        const gfx::Point tile = docGrid.canvasToTile(stroke[i].toPoint());
+        const gfx::Point center = docGrid.tileToCanvas(tile) + docGrid.tileCenter();
+        stroke[i].x = center.x;
+        stroke[i].y = center.y;
+      }
+      return;
+    }
+
     auto grid = loop->getGridBounds();
 
     Rect a(snap_to_grid(grid, stroke[0].toPoint(), PreferSnapTo::BoxOrigin),

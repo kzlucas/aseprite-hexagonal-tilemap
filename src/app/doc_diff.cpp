@@ -151,6 +151,9 @@ DocDiff compare_docs(const Doc* a, const Doc* b)
         break;
       }
       else if (aTileset->grid().tileSize() != bTileset->grid().tileSize() ||
+               // Hexagonal grids (orthogonal ones compare the tile size only)
+               ((aTileset->grid().isHexagonal() || bTileset->grid().isHexagonal()) &&
+                aTileset->grid() != bTileset->grid()) ||
                aTileset->size() != bTileset->size() ||
                aTileset->userData() != bTileset->userData()) {
         diff.anything = diff.tilesets = true;

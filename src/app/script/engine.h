@@ -43,6 +43,7 @@ class ColorSpace;
 
 namespace doc {
 class Cel;
+class Grid;
 class Image;
 class Layer;
 class Mask;
@@ -185,6 +186,7 @@ void push_window_events(lua_State* L, ui::Window* window);
 gfx::Point convert_args_into_point(lua_State* L, int index);
 gfx::Rect convert_args_into_rect(lua_State* L, int index);
 gfx::Size convert_args_into_size(lua_State* L, int index);
+doc::Grid convert_args_into_grid(lua_State* L, int index);
 app::Color convert_args_into_color(lua_State* L, int index);
 doc::color_t convert_args_into_pixel_color(lua_State* L,
                                            int index,

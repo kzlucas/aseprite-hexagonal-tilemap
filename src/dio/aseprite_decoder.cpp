@@ -22,6 +22,7 @@
 #include "dio/file_interface.h"
 #include "dio/pixel_io.h"
 #include "doc/doc.h"
+#include "doc/grid_properties.h"
 #include "doc/util.h"
 #include "fixmath/fixmath.h"
 #include "fmt/format.h"
@@ -272,6 +273,11 @@ bool AsepriteDecoder::decode()
                   // the tags?
                   Tileset* tileset = static_cast<Tileset*>(last_object_with_user_data);
                   readTilesData(tileset, extFiles);
+
+                  // Hexagonal grid settings saved as extension
+                  // properties (before tilemap cels are read, so
+                  // their bounds use the right grid)
+                  apply_tileset_grid_properties(tileset);
                   last_object_with_user_data = nullptr;
                   break;
               }

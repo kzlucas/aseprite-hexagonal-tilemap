@@ -54,6 +54,7 @@ public:
   virtual bool allowLayerEdges() override { return false; }
 
   virtual bool getGridBounds(Editor* editor, gfx::Rect& gridBounds) override;
+  virtual bool getGrid(Editor* editor, doc::Grid& grid) override;
 
   void initToolLoop(Editor* editor, const ui::MouseMessage* msg, const tools::Pointer& pointer);
 

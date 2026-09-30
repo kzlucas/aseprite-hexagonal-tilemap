@@ -17,6 +17,7 @@
   #include "doc/render_plan.h"
   #include "os/common/generic_surface.h"
   #include "os/skia/skia_surface.h"
+  #include "render/render.h"
 
   #include "include/core/SkCanvas.h"
   #include "include/effects/SkRuntimeEffect.h"
@@ -291,6 +292,29 @@ void ShaderRenderer::renderPlan(SkCanvas* canvas,
         }
 
         const gfx::Clip iarea(area);
+
+        // Hexagonal tiles overlap, they are composed in a regular image
+        // (the same way than render::Render does)
+        if (grid.isHexagonal()) {
+          gfx::Rect bounds = m_proj.remove(gfx::Rect(iarea.src, iarea.size));
+          bounds.enlarge(1);
+          bounds &= gfx::Rect(celBounds);
+          const doc::ImageRef hexImage =
+            render::compose_hex_tilemap(celImage, tileset, grid, bounds);
+          if (hexImage) {
+            int t;
+            int opacity = cel->opacity();
+            opacity = MUL_UN8(opacity, tilemapLayer->opacity(), t);
+            drawImage(canvas,
+                      hexImage.get(),
+                      bounds.x,
+                      bounds.y,
+                      opacity,
+                      tilemapLayer->blendMode());
+          }
+          break;
+        }
+
         gfx::Rect tilesToDraw = grid.canvasToTile(m_proj.remove(gfx::Rect(iarea.src, iarea.size)));
 
         int yPixelsPerTile = m_proj.applyY(grid.tileSize().h);

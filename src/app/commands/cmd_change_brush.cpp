@@ -15,6 +15,7 @@
 #include "app/context.h"
 #include "app/i18n/strings.h"
 #include "app/pref/preferences.h"
+#include "app/site.h"
 #include "app/tilemap_mode.h"
 #include "app/tools/active_tool.h"
 #include "app/tools/ink.h"
@@ -24,8 +25,10 @@
 #include "doc/algorithm/flip_image.h"
 #include "doc/brush.h"
 #include "doc/image_ref.h"
+#include "doc/layer_tilemap.h"
 #include "doc/primitives.h"
 #include "doc/tile.h"
+#include "doc/tileset.h"
 
 #include <algorithm>
 #include <string>
@@ -120,6 +123,16 @@ void ChangeBrushCommand::onExecute(Context* context)
 
   ToolPreferences::Brush& brushPref = pref.tool(tool).brush;
 
+  // Flips that can be used with the tiles of the active tileset
+  // (hexagonal tiles can't be flipped diagonally or rotated, and they
+  // can be flipped only if their mask is symmetric)
+  doc::tile_flags validTileFlags = doc::tile_f_xflip | doc::tile_f_yflip | doc::tile_f_dflip;
+  {
+    const Site site = context->activeSite();
+    if (site.layer() && site.layer()->isTilemap())
+      validTileFlags = static_cast<LayerTilemap*>(site.layer())->tileset()->grid().validTileFlags();
+  }
+
   switch (m_change) {
     case None:
       // Do nothing
@@ -194,8 +207,14 @@ void ChangeBrushCommand::onExecute(Context* context)
       if (colorBar && colorBar->tilemapMode() == TilemapMode::Tiles) {
         doc::tile_t t = pref.colorBar.fgTile();
         switch (m_change) {
-          case FlipX: pref.colorBar.fgTile(t ^ tile_f_xflip); break;
-          case FlipY: pref.colorBar.fgTile(t ^ tile_f_yflip); break;
+          case FlipX:
+            if (validTileFlags & tile_f_xflip)
+              pref.colorBar.fgTile(t ^ tile_f_xflip);
+            break;
+          case FlipY:
+            if (validTileFlags & tile_f_yflip)
+              pref.colorBar.fgTile(t ^ tile_f_yflip);
+            break;
         }
       }
       else if (isImageBrush) {
@@ -231,6 +250,8 @@ void ChangeBrushCommand::onExecute(Context* context)
     case FlipD:
     case Rotate90CW:
       if (colorBar && colorBar->tilemapMode() == TilemapMode::Tiles) {
+        if (!(validTileFlags & tile_f_dflip))
+          break;
         doc::tile_t t = pref.colorBar.fgTile();
         switch (m_change) {
           case FlipD:      pref.colorBar.fgTile(t ^ tile_f_dflip); break;

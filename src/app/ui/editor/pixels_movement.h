@@ -98,8 +98,12 @@ public:
   void moveImage(const gfx::PointF& pos, MoveModifier moveModifier);
 
   // Returns a copy of the current image being dragged with the
-  // current transformation.
-  void getDraggedImageCopy(std::unique_ptr<Image>& outputImage, std::unique_ptr<Mask>& outputMask);
+  // current transformation. For hexagonal tiles, "tilemapPos" (if
+  // it's not nullptr) receives the canvas position of the first tile
+  // of the image (see Clipboard::copyTilemap()).
+  void getDraggedImageCopy(std::unique_ptr<Image>& outputImage,
+                           std::unique_ptr<Mask>& outputMask,
+                           gfx::Point* tilemapPos = nullptr);
 
   // Copies the image being dragged in the current position.
   void stampImage();
@@ -161,7 +165,7 @@ private:
   void updateDocumentMask();
   void hideDocumentMask();
 
-  void flipOriginalImage(const doc::algorithm::FlipType flipType);
+  bool flipOriginalImage(const doc::algorithm::FlipType flipType);
   void shiftOriginalImage(const int dx, const int dy, const double angle);
   CelList getEditableCels();
   void reproduceAllTransformationsWithInnerCmds();
@@ -174,6 +178,15 @@ private:
                                   const doc::Grid& grid,
                                   const gfx::Size& deltaA,
                                   const gfx::Size& deltaB);
+
+  // Hexagonal tiles (TilemapMode::Tiles with a hexagonal grid) are
+  // moved by displacements between tiles of the grid, and they can't
+  // be scaled or rotated (see doc/hex_tiles.h).
+  bool isHexTiles() const;
+  void initHexTiles();
+  gfx::Point hexDelta(const Transformation& transformation) const;
+  gfx::Point hexMoveDelta(const gfx::PointF& pos, MoveModifier moveModifier) const;
+  gfx::Rect hexExtraCelTiles(const Transformation& transformation) const;
 
 #if _DEBUG
   void dumpInnerCmds();
@@ -193,6 +206,9 @@ private:
   Transformation m_currentData;
   std::unique_ptr<Mask> m_initialMask, m_initialMask0;
   std::unique_ptr<Mask> m_currentMask;
+  // Canvas position of the first tile of m_originalImage (the
+  // position of the tilemap) when we're moving hexagonal tiles
+  gfx::Point m_hexPos;
   bool m_opaque;
   color_t m_maskColor;
   const TiledModeHelper* m_tiledModeHelper = nullptr;

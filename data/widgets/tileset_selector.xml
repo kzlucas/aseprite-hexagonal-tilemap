@@ -15,6 +15,39 @@
     <label text="@.grid_height" for="grid_height" />
     <expr id="grid_height" text="" />
 
+    <label text="@.shape" for="shape" />
+    <combobox id="shape" cell_hspan="3">
+      <listitem text="@.shape_square" value="square" />
+      <listitem text="@.shape_hex_pointy" value="pointy" />
+      <listitem text="@.shape_hex_flat" value="flat" />
+    </combobox>
+
+    <label id="hex_step_label" text="@.hex_step" for="hex_step" />
+    <expr id="hex_step" text="" tooltip="@.hex_step_tooltip" />
+    <label id="hex_parity_label" text="@.hex_parity" for="hex_parity" />
+    <combobox id="hex_parity">
+      <listitem text="@.parity_odd" value="odd" />
+      <listitem text="@.parity_even" value="even" />
+    </combobox>
+
+    <label id="hex_mask_label" text="@.hex_mask" />
+    <buttonset id="hex_mask_mode" columns="2" cell_hspan="3">
+      <item id="hex_mask_auto" text="@.mask_auto" />
+      <item id="hex_mask_custom" text="@.mask_custom" />
+    </buttonset>
+
+    <hbox id="hex_mask_row" cell_hspan="4">
+      <vbox id="hex_mask_editor_place" tooltip="@.mask_editor_tooltip" />
+      <vbox>
+        <button id="hex_mask_from_selection" text="@.mask_from_selection" tooltip="@.mask_from_selection_tooltip" />
+        <button id="hex_mask_reset" text="@.mask_reset" tooltip="@.mask_reset_tooltip" />
+        <boxfiller />
+      </vbox>
+    </hbox>
+
+    <vbox id="hex_preview_place" cell_hspan="4" />
+    <label id="hex_status" text="" cell_hspan="4" />
+
     <label id="base_index_label" text="@.base_index" for="base_index" />
     <expr id="base_index" text="1" tooltip="@.base_tooltip" />
     <boxfiller id="base_index_filler" cell_hspan="2" />

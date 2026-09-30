@@ -78,10 +78,14 @@ public:
   void copyMerged(const ContextReader& context);
   void copyRange(const ContextReader& context, const view::Range& range);
   void copyImage(const doc::Image* image, const doc::Mask* mask, const doc::Palette* palette);
+  // "tilemapPos" is the canvas position of the first tile of a
+  // hexagonal tilemap (each cel can have its own lattice of tiles, so
+  // the tiles can be pasted in the same place)
   void copyTilemap(const doc::Image* image,
                    const doc::Mask* mask,
                    const doc::Palette* pal,
-                   const doc::Tileset* tileset);
+                   const doc::Tileset* tileset,
+                   const gfx::Point* tilemapPos = nullptr);
   void copyPalette(const doc::Palette* palette, const doc::PalettePicks& picks);
   void copySlices(const std::vector<doc::Slice*> slices);
   void paste(Context* ctx, const bool interactive, const gfx::Point* position = nullptr);

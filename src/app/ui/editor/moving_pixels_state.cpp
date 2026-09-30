@@ -644,7 +644,8 @@ void MovingPixelsState::onBeforeCommandExecution(CommandExecutionEvent& ev)
       Doc* document = m_editor->document();
       std::unique_ptr<Image> floatingImage;
       std::unique_ptr<Mask> floatingMask;
-      m_pixelsMovement->getDraggedImageCopy(floatingImage, floatingMask);
+      gfx::Point tilemapPos;
+      m_pixelsMovement->getDraggedImageCopy(floatingImage, floatingMask, &tilemapPos);
 
       if (floatingImage->isTilemap()) {
         Site site = m_editor->getSite();
@@ -652,7 +653,8 @@ void MovingPixelsState::onBeforeCommandExecution(CommandExecutionEvent& ev)
         Clipboard::instance()->copyTilemap(floatingImage.get(),
                                            floatingMask.get(),
                                            document->sprite()->palette(m_editor->frame()),
-                                           site.tileset());
+                                           site.tileset(),
+                                           (site.grid().isHexagonal() ? &tilemapPos : nullptr));
       }
       else {
         Clipboard::instance()->copyImage(floatingImage.get(),

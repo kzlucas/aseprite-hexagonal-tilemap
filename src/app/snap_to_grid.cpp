@@ -11,9 +11,12 @@
 
 #include "app/snap_to_grid.h"
 
+#include "doc/grid.h"
 #include "gfx/point.h"
 #include "gfx/rect.h"
 
+#include <climits>
+#include <cmath>
 #include <cstdlib>
 
 namespace app {
@@ -71,6 +74,36 @@ gfx::Point snap_to_grid(const gfx::Rect& grid, const gfx::Point& point, const Pr
   }
 
   return newPoint;
+}
+
+gfx::Point snap_to_hex_tile_position(const doc::Grid& grid, const gfx::Point& point)
+{
+  // The closest tile position is one of the positions of the tiles
+  // around the tile that starts at or before the point
+  const gfx::Point tile0 = grid.originToTile(point);
+  gfx::Point result = point;
+  int bestDist = INT_MAX;
+  for (int dv = -1; dv <= 1; ++dv) {
+    for (int du = -1; du <= 1; ++du) {
+      const gfx::Point pos = grid.tileToCanvas(tile0 + gfx::Point(du, dv));
+      const int dist = (pos.x - point.x) * (pos.x - point.x) +
+                       (pos.y - point.y) * (pos.y - point.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        result = pos;
+      }
+    }
+  }
+  return result;
+}
+
+gfx::Point snap_to_hex_stagger_period(const doc::Grid& grid, const gfx::Point& delta)
+{
+  const gfx::Size period = grid.staggerPeriod();
+  const int px = period.w * grid.tileOffset().x;
+  const int py = period.h * grid.tileOffset().y;
+  return gfx::Point(int(std::round(double(delta.x) / px)) * px,
+                    int(std::round(double(delta.y) / py)) * py);
 }
 
 } // namespace app

@@ -9,6 +9,7 @@
 #endif
 
 #include "app/cmd/set_tileset_base_index.h"
+#include "app/cmd/set_tileset_grid.h"
 #include "app/cmd/set_tileset_name.h"
 #include "app/script/docobj.h"
 #include "app/script/engine.h"
@@ -91,6 +92,26 @@ int Tileset_get_grid(lua_State* L)
   return 1;
 }
 
+// Changes the grid of the tileset (e.g. to a hexagonal grid), keeping
+// the same tile size
+int Tileset_set_grid(lua_State* L)
+{
+  auto tileset = get_docobj<Tileset>(L, 1);
+  doc::Grid grid = convert_args_into_grid(L, 2);
+  if (grid.tileSize() != tileset->grid().tileSize())
+    return luaL_error(L, "the tile size of a tileset cannot be changed");
+
+  // The origin of the tileset grid is always 0,0 (each tilemap cel
+  // uses its own position as the origin)
+  grid.origin(gfx::Point(0, 0));
+  if (grid != tileset->grid()) {
+    Tx tx(tileset->sprite());
+    tx(new cmd::SetTilesetGrid(tileset, grid));
+    tx.commit();
+  }
+  return 0;
+}
+
 int Tileset_get_baseIndex(lua_State* L)
 {
   auto tileset = get_docobj<Tileset>(L, 1);
@@ -119,7 +140,7 @@ const luaL_Reg Tileset_methods[] = {
 
 const Property Tileset_properties[] = {
   { "name",       Tileset_get_name,                 Tileset_set_name                 },
-  { "grid",       Tileset_get_grid,                 nullptr                          },
+  { "grid",       Tileset_get_grid,                 Tileset_set_grid                 },
   { "baseIndex",  Tileset_get_baseIndex,            Tileset_set_baseIndex            },
   { "color",      UserData_get_color<Tileset>,      UserData_set_color<Tileset>      },
   { "data",       UserData_get_text<Tileset>,       UserData_set_text<Tileset>       },

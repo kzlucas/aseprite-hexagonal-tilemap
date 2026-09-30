@@ -20,6 +20,7 @@
 #include "dio/file_interface.h"
 #include "dio/pixel_io.h"
 #include "doc/doc.h"
+#include "doc/grid_properties.h"
 #include "fixmath/fixmath.h"
 #include "fmt/format.h"
 #include "zlib.h"
@@ -1004,7 +1005,7 @@ void AsepriteEncoder::writeExternalFilesChunk(AsepriteFrameHeader* frame_header,
       ext_files.insert(ASE_EXTERNAL_FILE_TILESET, tileset->externalFilename());
     }
 
-    putExtentionIds(tileset->userData().propertiesMaps(), ext_files);
+    putExtentionIds(tileset_user_data_with_grid(tileset).propertiesMaps(), ext_files);
 
     for (tile_index i = 0; i < tileset->size(); ++i) {
       UserData tileData = tileset->getTileData(i);
@@ -1075,7 +1076,10 @@ void AsepriteEncoder::writeTilesetChunks(AsepriteFrameHeader* frame_header,
   for (const Tileset* tileset : *tilesets) {
     if (tileset) {
       writeTilesetChunk(frame_header, ext_files, tileset, si);
-      writeUserDataChunk(frame_header, ext_files, &tileset->userData());
+
+      // The hexagonal grid settings are saved as extension properties
+      const UserData userData = tileset_user_data_with_grid(tileset);
+      writeUserDataChunk(frame_header, ext_files, &userData);
 
       // Write tile UserData
       for (tile_index i = 0; i < tileset->size(); ++i) {

@@ -33,9 +33,44 @@ PatchCel::PatchCel(doc::Cel* dstCel,
   ASSERT(!patchedRegion.isEmpty());
 }
 
+PatchCel::PatchCel(doc::Cel* dstCel,
+                   const doc::Image* patch,
+                   const gfx::Region& patchedTiles,
+                   const gfx::Point& patchPos,
+                   Tiles)
+  : WithCel(dstCel)
+  , m_patch(patch)
+  , m_region(m_tilesRegion)
+  , m_pos(patchPos)
+  , m_tiles(true)
+  , m_tilesRegion(patchedTiles)
+{
+  ASSERT(!patchedTiles.isEmpty());
+  ASSERT(dstCel->image()->pixelFormat() == IMAGE_TILEMAP);
+}
+
 void PatchCel::onExecute()
 {
   Cel* cel = this->cel();
+
+  // Hexagonal tilemaps are patched in tiles
+  if (m_tiles) {
+    // Position of the patch in the tiles of the cel
+    const Grid grid = cel->grid();
+    const gfx::Point patchTile = grid.originToTile(m_pos);
+
+    const gfx::Rect oldTiles = cel->image()->bounds();
+    const gfx::Rect newTiles = grid.alignTilesToStagger(
+      oldTiles | gfx::Rect(m_tilesRegion.bounds()).offset(patchTile));
+    if (newTiles != oldTiles)
+      executeAndAdd(new CropCel(cel, newTiles, CropCel::Tiles()));
+
+    executeAndAdd(
+      new CopyRegion(cel->image(), m_patch, m_tilesRegion, patchTile - newTiles.origin()));
+    executeAndAdd(new TrimCel(cel));
+    m_patch = nullptr;
+    return;
+  }
 
   gfx::Rect newBounds;
   gfx::Region regionInTiles;

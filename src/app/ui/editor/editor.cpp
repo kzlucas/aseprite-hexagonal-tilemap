@@ -60,6 +60,7 @@
 #include "base/convert_to.h"
 #include "base/scoped_value.h"
 #include "doc/doc.h"
+#include "doc/hex_tiles.h"
 #include "doc/mask_boundaries.h"
 #include "doc/slice.h"
 #include "fmt/format.h"
@@ -413,7 +414,9 @@ void Editor::setLayer(const Layer* layer)
       m_showGuidesThisCel ||
       // If grid settings changed
       (gridVisible &&
-       (oldGrid.tileSize() != newGrid.tileSize() || oldGrid.origin() != newGrid.origin()))) {
+       (oldGrid.tileSize() != newGrid.tileSize() || oldGrid.origin() != newGrid.origin() ||
+        // Hexagonal tile grids
+        ((oldGrid.isHexagonal() || newGrid.isHexagonal()) && oldGrid != newGrid)))) {
       // We've to redraw the whole editor
       invalidate();
     }
@@ -868,7 +871,15 @@ void Editor::drawOneSpriteUnclippedRect(ui::Graphics* g,
           }
 
           if (alpha > 8) {
-            drawGrid(g, enclosingRect, gridrc, m_docPref.grid.color(), alpha);
+            // The grid of a hexagonal tileset is drawn as the edges of the tiles
+            doc::Grid hexGrid;
+            if (!m_state->getGrid(this, hexGrid))
+              hexGrid = getSite().grid();
+
+            if (hexGrid.isHexagonal())
+              drawHexGrid(g, enclosingRect, hexGrid, m_docPref.grid.color(), alpha);
+            else
+              drawGrid(g, enclosingRect, gridrc, m_docPref.grid.color(), alpha);
           }
         }
 
@@ -1229,6 +1240,85 @@ void Editor::drawGrid(Graphics* g,
 
   for (double c = x1; c <= x2; c += gridF.w)
     g->drawVLine(grid_color, c, y1, spriteBounds.h);
+}
+
+void Editor::drawHexGrid(Graphics* g,
+                         const gfx::Rect& spriteBounds,
+                         const doc::Grid& grid,
+                         const app::Color& color,
+                         int alpha)
+{
+  if ((m_flags & kShowGrid) == 0 || !grid.hasMask())
+    return;
+
+  const doc::Image* mask = grid.mask().get();
+  const double sx = m_proj.scaleX();
+  const double sy = m_proj.scaleY();
+
+  // Edges of one tile at the current zoom level: only the top and
+  // left edges of the mask pixels, because the bottom/right edges are
+  // the top/left edges of the neighbor tiles (so each edge between two
+  // tiles is drawn once).
+  gfx::Path cell;
+  for (int y = 0; y < mask->height(); ++y) {
+    for (int x = 0; x < mask->width(); ++x) {
+      if (!mask->getPixel(x, y) || (y > 0 && mask->getPixel(x, y - 1)))
+        continue;
+      int x2 = x + 1;
+      while (x2 < mask->width() && mask->getPixel(x2, y) && (y == 0 || !mask->getPixel(x2, y - 1)))
+        ++x2;
+      cell.moveTo(x * sx, y * sy);
+      cell.lineTo(x2 * sx, y * sy);
+      x = x2 - 1;
+    }
+  }
+  for (int x = 0; x < mask->width(); ++x) {
+    for (int y = 0; y < mask->height(); ++y) {
+      if (!mask->getPixel(x, y) || (x > 0 && mask->getPixel(x - 1, y)))
+        continue;
+      int y2 = y + 1;
+      while (y2 < mask->height() && mask->getPixel(x, y2) && (x == 0 || !mask->getPixel(x - 1, y2)))
+        ++y2;
+      cell.moveTo(x * sx, y * sy);
+      cell.lineTo(x * sx, y2 * sy);
+      y = y2 - 1;
+    }
+  }
+
+  gfx::Color grid_color = color_utils::color_for_ui(color);
+  grid_color =
+    gfx::rgba(gfx::getr(grid_color), gfx::getg(grid_color), gfx::getb(grid_color), alpha);
+
+  ui::Paint paint;
+  paint.style(ui::Paint::Stroke);
+  paint.antialias(false);
+  paint.color(grid_color);
+
+  // Tiles visible in the painted area of the sprite
+  gfx::Rect clip = (g->getClipBounds() & spriteBounds);
+  if (clip.isEmpty())
+    return;
+  const gfx::Rect canvasArea(int(std::floor((clip.x - spriteBounds.x) / sx)),
+                             int(std::floor((clip.y - spriteBounds.y) / sy)),
+                             int(std::ceil(clip.w / sx)) + 1,
+                             int(std::ceil(clip.h / sy)) + 1);
+  gfx::Rect tiles = grid.canvasToTile(canvasArea);
+  tiles.enlarge(1);
+
+  IntersectClip spriteClip(g, clip);
+  if (!spriteClip)
+    return;
+
+  for (int v = tiles.y; v < tiles.y2(); ++v) {
+    for (int u = tiles.x; u < tiles.x2(); ++u) {
+      const gfx::Point pos = grid.tileToCanvas(gfx::Point(u, v));
+      const double dx = spriteBounds.x + pos.x * sx;
+      const double dy = spriteBounds.y + pos.y * sy;
+      cell.offset(dx, dy);
+      g->drawPath(cell, paint);
+      cell.offset(-dx, -dy);
+    }
+  }
 }
 
 void Editor::drawSlices(ui::Graphics* g)
@@ -2866,7 +2956,8 @@ void Editor::setZoomAndCenterInMouse(const Zoom& zoom,
 void Editor::pasteImage(const ImageRef& image,
                         const Mask* mask,
                         const gfx::Point* position,
-                        const Tileset* srcTileset)
+                        const Tileset* srcTileset,
+                        const gfx::Point* tilemapPos)
 {
   ASSERT(image);
 
@@ -2941,7 +3032,31 @@ void Editor::pasteImage(const ImageRef& image,
 
   // Snap to grid a pasted tilemap
   // TODO should we move this to PixelsMovement or MovingPixelsState?
-  if (site.tilemapMode() == TilemapMode::Tiles) {
+  bool hexTiles = false;
+  if (site.tilemapMode() == TilemapMode::Tiles && site.grid().isHexagonal()) {
+    // Pasted hexagonal tiles are moved from the position where they
+    // were copied so their first tile ("tilemapPos") is at the
+    // closest position of a first tile of a tilemap of this grid
+    // (keeping the stagger of the rows or columns)
+    const doc::Grid grid = site.grid();
+    const gfx::Point period(grid.staggerPeriod().w * grid.tileOffset().x,
+                            grid.staggerPeriod().h * grid.tileOffset().y);
+    const gfx::Point origin = mask->bounds().origin();
+    const gfx::Point firstTile =
+      (tilemapPos ? *tilemapPos :
+                    grid.tilemapPosition(
+                      grid.alignTilesToStagger(grid.canvasToTile(mask->bounds())).origin()));
+    const gfx::Point pt = (position ? *position : gfx::Point(x, y)) - origin + firstTile -
+                          grid.origin();
+    const gfx::Point delta = grid.origin() +
+                             gfx::Point(int(std::round(double(pt.x) / period.x)) * period.x,
+                                        int(std::round(double(pt.y) / period.y)) * period.y) -
+                             firstTile;
+    x = origin.x + delta.x;
+    y = origin.y + delta.y;
+    hexTiles = true;
+  }
+  else if (site.tilemapMode() == TilemapMode::Tiles) {
     gfx::Rect gridBounds = site.gridBounds();
     gfx::Point pt = snap_to_grid(gridBounds, gfx::Point(x, y), PreferSnapTo::ClosestGridVertex);
     x = pt.x;
@@ -2953,7 +3068,7 @@ void Editor::pasteImage(const ImageRef& image,
   m_brushPreview.hide();
 
   Mask mask2(*mask);
-  if (position)
+  if (position && !hexTiles)
     mask2.setOrigin(position->x, position->y);
   else
     mask2.setOrigin(x, y);
@@ -2970,6 +3085,25 @@ void Editor::pasteImage(const ImageRef& image,
     const auto& grid = srcTileset->grid();
     Size dstSize = image->size();
     dstSize = grid.tilemapSizeToCanvas(dstSize);
+    gfx::Rect celBounds(gfx::Point(0, 0), dstSize);
+
+    // Hexagonal tiles are rasterized in the bounds of their mask (the
+    // tilemap starts at the aligned tile at the mask bounds, see
+    // new_tilemap_from_mask())
+    if (grid.isHexagonal()) {
+      gfx::Point firstTile;
+      if (tilemapPos) {
+        firstTile = *tilemapPos;
+      }
+      else {
+        gfx::Point tile;
+        if (!doc::find_hex_tiles_origin(image.get(), mask, grid, tile))
+          tile = grid.alignTilesToStagger(grid.canvasToTile(mask->bounds())).origin();
+        firstTile = grid.tilemapPosition(tile);
+      }
+      celBounds.setOrigin(firstTile - mask->bounds().origin());
+      dstSize = mask->bounds().size();
+    }
 
     // Here we rasterize the tilemap.
     const doc::PixelFormat dstPixelFormat = sprite->pixelFormat();
@@ -2981,7 +3115,7 @@ void Editor::pasteImage(const ImageRef& image,
                                image.get(),
                                srcTileset,
                                sprite->palette(site.frame()),
-                               pastedImage->bounds(),
+                               celBounds,
                                gfx::Clip(0, 0, pastedImage->bounds()),
                                255,
                                doc::BlendMode::NORMAL);

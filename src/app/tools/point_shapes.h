@@ -82,6 +82,13 @@ public:
   {
     const doc::Grid& grid = loop->getGrid();
     gfx::Point newPos = grid.canvasToTile(pt.toPoint());
+
+    // Selection tools select the hexagonal tiles whose center is
+    // inside the selected area
+    if (grid.isHexagonal() && loop->getInk()->isSelection() &&
+        pt.toPoint() != grid.tileToCanvas(newPos) + grid.tileCenter())
+      return;
+
     if (newPos == m_lastTilePos)
       return;
     m_lastTilePos = newPos;
@@ -97,6 +104,17 @@ public:
                        Rect& area) override
   {
     const doc::Grid& grid = loop->getGrid();
+
+    // The bounds of hexagonal tiles overlap, and a tile modified by a
+    // stroke can extend beyond the bounds of the tiles at the corners
+    // of the stroke (e.g. a tile of the previous row), so the area
+    // includes the bounds of any tile that can contain this pixel
+    if (grid.isHexagonal()) {
+      const gfx::Size sz = grid.tileSize();
+      area = Rect(x - sz.w + 1, y - sz.h + 1, 2 * sz.w - 1, 2 * sz.h - 1);
+      return;
+    }
+
     area = grid.alignBounds(Rect(x, y, 1, 1));
   }
 };
@@ -317,6 +335,15 @@ class FloodFillPointShape : public PointShape {
 public:
   bool isFloodFill() override { return true; }
 
+  // Returns the pixels (in the coordinates of the images of the tool
+  // loop) of the hexagonal tile under the given point
+  static gfx::Region hexTileRegion(ToolLoop* loop, int x, int y)
+  {
+    doc::Grid grid = loop->getGrid();
+    grid.origin(grid.origin() - loop->getCelOrigin());
+    return grid.tileRegionInCanvas(grid.canvasToTile(gfx::Point(x, y)));
+  }
+
   void transformPoint(ToolLoop* loop, const Stroke::Pt& pt) override
   {
     const doc::Image* srcImage = loop->getFloodFillSrcImage();
@@ -335,9 +362,33 @@ public:
 
     loop->getInk()->prepareForPointShape(loop, true, wpt.x, wpt.y, pt.symmetry);
 
+    // Hexagonal tiles are connected with their 6 neighbors
+    if (tilesMode && loop->getGrid().isHexagonal() && loop->getContiguous()) {
+      doc::algorithm::hex_floodfill(srcImage,
+                                    loop->getGrid(),
+                                    (loop->useMask() ? loop->getMask() : nullptr),
+                                    wpt.x,
+                                    wpt.y,
+                                    loop,
+                                    (AlgoHLine)doInkHline);
+      return;
+    }
+
+    // A flood fill that stops at the grid of a hexagonal tilemap (in
+    // pixels mode) is limited to the hexagon under the point
+    const doc::Mask* mask = (loop->useMask() ? loop->getMask() : nullptr);
+    doc::Mask hexMask;
+    if (!tilesMode && loop->getStopAtGrid() && loop->getGrid().isHexagonal()) {
+      for (const gfx::Rect& rc : hexTileRegion(loop, wpt.x, wpt.y))
+        hexMask.add(rc);
+      if (mask)
+        hexMask.intersect(*mask);
+      mask = &hexMask;
+    }
+
     doc::algorithm::floodfill(
       srcImage,
-      (loop->useMask() ? loop->getMask() : nullptr),
+      mask,
       wpt.x,
       wpt.y,
       (tilesMode ? srcImage->bounds() : floodfillBounds(loop, wpt.x, wpt.y)),
@@ -368,6 +419,10 @@ private:
     if (srcImage->pixelFormat() == IMAGE_TILEMAP) { // Tiles mode
       const doc::Grid& grid = loop->getGrid();
       bounds = grid.tileToCanvas(bounds);
+    }
+    // Limit the flood-fill to the current hexagon (see transformPoint())
+    else if (loop->getStopAtGrid() && loop->getGrid().isHexagonal()) {
+      bounds &= hexTileRegion(loop, x, y).bounds();
     }
     // Limit the flood-fill to the current tile if the grid is visible.
     else if (loop->getStopAtGrid()) {

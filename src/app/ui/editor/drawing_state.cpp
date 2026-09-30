@@ -374,6 +374,19 @@ bool DrawingState::getGridBounds(Editor* editor, gfx::Rect& gridBounds)
     return false;
 }
 
+bool DrawingState::getGrid(Editor* editor, doc::Grid& grid)
+{
+  if (m_toolLoop) {
+    // The grid where the stroke started (the tool loop grid can be
+    // moved to the expanded canvas)
+    grid = m_toolLoop->getGrid();
+    grid.origin(m_toolLoop->getGridBounds().origin());
+    return true;
+  }
+  else
+    return false;
+}
+
 void DrawingState::handleMouseMovement()
 {
   // Notify mouse movement to the tool

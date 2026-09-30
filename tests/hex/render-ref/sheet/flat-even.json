@@ -1,0 +1,26 @@
+{ "frames": [
+   {
+    "filename": "flat-even.aseprite",
+    "frame": { "x": 0, "y": 0, "w": 72, "h": 90 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 72, "h": 90 },
+    "sourceSize": { "w": 72, "h": 90 },
+    "duration": 100
+   }
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "image": "flat-even.png",
+  "format": "RGBA8888",
+  "size": { "w": 72, "h": 90 },
+  "scale": "1",
+  "layers": [
+   { "name": "Layer 1", "opacity": 255, "blendMode": "normal" },
+   { "name": "Tilemap 1", "opacity": 255, "blendMode": "normal" }
+  ],
+  "tilesets": [
+   { "index": 0, "name": "", "tileSize": { "w": 12, "h": 18 }, "shape": "hexFlatTop", "parity": "even", "step": 10, "mask": ["..########..", "..########..", ".##########.", ".##########.", ".##########.", ".##########.", ".##########.", "############", "############", "############", "############", ".##########.", ".##########.", ".##########.", ".##########.", ".##########.", "..########..", "..########.."], "layers": ["Tilemap 1"] }
+  ]
+ }
+}

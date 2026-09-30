@@ -28,6 +28,7 @@
 #include "doc/algorithm/shrink_bounds.h"
 #include "doc/cel.h"
 #include "doc/grid.h"
+#include "doc/hex_tiles.h"
 #include "doc/image.h"
 #include "doc/layer.h"
 #include "doc/layer_tilemap.h"
@@ -159,13 +160,17 @@ bool find_tile(const doc::Tileset* tileset,
     return true;
   }
 
-  if (tileset->matchFlags() == 0) // In case we don't allow flipped tiles
+  // Flips that can be used with the tiles of the grid (hexagonal tiles
+  // can't be flipped diagonally, and they can be flipped in X/Y only if
+  // their mask is symmetric)
+  const doc::tile_flags matchFlags = (tileset->matchFlags() & tileset->grid().validTileFlags());
+  if (matchFlags == 0) // In case we don't allow flipped tiles
     return false;
 
   DoFlip x(tileImage, doc::algorithm::FlipHorizontal);
 
   // Find with X flip
-  if (tileset->matchFlags() & doc::tile_f_xflip) {
+  if (matchFlags & doc::tile_f_xflip) {
     x.flip();
     if (tileset->findTileIndex(tileImage, tileIndex)) {
       tileFlags = doc::tile_f_xflip;
@@ -176,14 +181,14 @@ bool find_tile(const doc::Tileset* tileset,
 
   // Find with Y flip
   DoFlip y(tileImage, doc::algorithm::FlipVertical);
-  if (tileset->matchFlags() & doc::tile_f_yflip) {
+  if (matchFlags & doc::tile_f_yflip) {
     y.flip();
     if (tileset->findTileIndex(tileImage, tileIndex)) {
       tileFlags = doc::tile_f_yflip;
       return true;
     }
 
-    if (tileset->matchFlags() & doc::tile_f_xflip) {
+    if (matchFlags & doc::tile_f_xflip) {
       // Find with X+Y flip
       x.flip();
       if (tileset->findTileIndex(tileImage, tileIndex)) {
@@ -196,7 +201,7 @@ bool find_tile(const doc::Tileset* tileset,
   }
 
   // Check if we can match diagonal flips
-  if ((tileset->matchFlags() & doc::tile_f_dflip) == 0)
+  if ((matchFlags & doc::tile_f_dflip) == 0)
     return false;
 
   // Find with D flip
@@ -208,7 +213,7 @@ bool find_tile(const doc::Tileset* tileset,
   }
 
   // Find with X+D flip
-  if (tileset->matchFlags() & doc::tile_f_xflip) {
+  if (matchFlags & doc::tile_f_xflip) {
     d.reset();
     x.flip();
     d.flip();
@@ -218,7 +223,7 @@ bool find_tile(const doc::Tileset* tileset,
     }
 
     // Find with X+Y+D flip
-    if (tileset->matchFlags() & doc::tile_f_yflip) {
+    if (matchFlags & doc::tile_f_yflip) {
       d.reset();
       y.flip();
       d.flip();
@@ -230,7 +235,7 @@ bool find_tile(const doc::Tileset* tileset,
   }
 
   // Find with Y+D flip only
-  if (tileset->matchFlags() & doc::tile_f_yflip) {
+  if (matchFlags & doc::tile_f_yflip) {
     d.reset();
     x.reset();
     if (!y)
@@ -277,6 +282,15 @@ doc::ImageRef crop_cel_image(const doc::Cel* cel, const color_t bgcolor)
   if (cel->layer()->isTilemap()) {
     doc::ImageRef dstImage(doc::Image::create(sprite->spec()));
 
+    // Hexagonal tilemaps are rendered in the sprite bounds (their cel
+    // usually starts at a negative position to keep the stagger of the
+    // grid, and the area rendered below would start at the cel
+    // origin, leaving the right/bottom part of the sprite empty)
+    const gfx::Clip area =
+      (cel->layer()->tileset()->grid().isHexagonal() ?
+         gfx::Clip(0, 0, -cel->position().x, -cel->position().y, sprite->width(), sprite->height()) :
+         gfx::Clip(cel->position(), dstImage->bounds()));
+
     render::Render().renderCel(dstImage.get(),
                                cel,
                                sprite,
@@ -284,7 +298,7 @@ doc::ImageRef crop_cel_image(const doc::Cel* cel, const color_t bgcolor)
                                cel->layer()->tileset(),
                                sprite->palette(cel->frame()),
                                dstImage->bounds(),
-                               gfx::Clip(cel->position(), dstImage->bounds()),
+                               area,
                                255,
                                BlendMode::NORMAL);
 
@@ -381,7 +395,12 @@ Cel* create_cel_copy(CmdSequence* cmds,
                                         srcCel->bounds(),
                                         tilemap);
       }
-      dstCel->setPosition(srcCel->position());
+      // A hexagonal tilemap can start before the source cel (it keeps
+      // the stagger of the grid), and its position was set by
+      // draw_image_into_new_tilemap_cel()
+      if (srcCel->layer() == dstLayer ||
+          !static_cast<doc::LayerTilemap*>(dstLayer)->tileset()->grid().isHexagonal())
+        dstCel->setPosition(srcCel->position());
     }
     // Tilemap -> Image (so we convert the tilemap to a regular image)
     else {
@@ -509,7 +528,16 @@ void draw_image_into_new_tilemap_cel(CmdSequence* cmds,
   grid.origin(gridOrigin);
 
   gfx::Size tileSize = grid.tileSize();
-  const gfx::Rect tilemapBounds = grid.canvasToTile(canvasBounds);
+  gfx::Rect tilemapBounds = grid.canvasToTile(canvasBounds);
+
+  // Hexagonal tilemaps keep the stagger of the grid (the given
+  // "newTilemap" can have a different size, e.g. from the tile bounds
+  // of the canvas bounds, so we create a new one)
+  if (grid.isHexagonal()) {
+    tilemapBounds = grid.alignTilesToStagger(tilemapBounds);
+    if (newTilemap && newTilemap->size() != tilemapBounds.size())
+      newTilemap.reset();
+  }
 
   if (!newTilemap) {
     newTilemap.reset(doc::Image::create(IMAGE_TILEMAP, tilemapBounds.w, tilemapBounds.h));
@@ -569,7 +597,7 @@ void draw_image_into_new_tilemap_cel(CmdSequence* cmds,
   doc->notifyTilesetChanged(tileset);
 
   dstCel->data()->setImage(newTilemap, dstLayer);
-  dstCel->setPosition(grid.tileToCanvas(tilemapBounds.origin()));
+  dstCel->setPosition(grid.tilemapPosition(tilemapBounds.origin()));
 }
 
 void modify_tilemap_cel_region(CmdSequence* cmds,
@@ -604,10 +632,13 @@ void modify_tilemap_cel_region(CmdSequence* cmds,
   grid.origin(grid.origin() + cel->position());
 
   const gfx::Size tileSize = grid.tileSize();
-  const gfx::Rect oldTilemapBounds(grid.canvasToTile(cel->position()),
+  const gfx::Rect oldTilemapBounds(grid.originToTile(cel->position()),
                                    cel->image()->bounds().size());
   const gfx::Rect patchTilemapBounds = grid.canvasToTile(region.bounds());
-  const gfx::Rect newTilemapBounds = (oldTilemapBounds | patchTilemapBounds);
+  gfx::Rect newTilemapBounds = (oldTilemapBounds | patchTilemapBounds);
+  // Hexagonal tilemaps keep the stagger of the grid
+  if (grid.isHexagonal())
+    newTilemapBounds = grid.alignTilesToStagger(newTilemapBounds);
 
   OPS_TRACE("modify_tilemap_cel_region:\n"
             " - grid.origin       =%d %d\n"
@@ -752,7 +783,7 @@ void modify_tilemap_cel_region(CmdSequence* cmds,
 
     if (newTilemap->width() != cel->image()->width() ||
         newTilemap->height() != cel->image()->height()) {
-      gfx::Point newPos = grid.tileToCanvas(newTilemapBounds.origin());
+      gfx::Point newPos = grid.tilemapPosition(newTilemapBounds.origin());
       if (cel->position() != newPos) {
         cmds->executeAndAdd(new cmd::SetCelPosition(cel, newPos));
       }
@@ -933,6 +964,29 @@ void clear_mask_from_cel(CmdSequence* cmds,
   else {
     cmds->executeAndAdd(new cmd::ClearMask(cel));
   }
+}
+
+bool flip_hex_tilemap_cel(CmdSequence* cmds,
+                          doc::Cel* cel,
+                          const gfx::Rect& bounds,
+                          const doc::algorithm::FlipType flipType)
+{
+  ASSERT(cel->layer()->isTilemap());
+
+  // The tiles of the cel start at the tile (0,0) of its grid
+  const doc::Grid grid = cel->grid();
+  doc::ImageRef tiles = cel->imageRef();
+  gfx::Point origin(0, 0);
+  if (!doc::flip_hex_tiles_in_bounds(tiles, origin, nullptr, grid, flipType, bounds))
+    return false;
+
+  if (tiles != cel->imageRef())
+    cmds->executeAndAdd(new cmd::ReplaceImage(cel->sprite(), cel->imageRef(), tiles));
+
+  const gfx::Point pos = grid.tilemapPosition(origin);
+  if (pos != cel->position())
+    cmds->executeAndAdd(new cmd::SetCelPosition(cel, pos.x, pos.y));
+  return true;
 }
 
 static void remove_unused_tiles_from_tileset(CmdSequence* cmds,

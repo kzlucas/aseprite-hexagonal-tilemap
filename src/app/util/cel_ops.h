@@ -11,6 +11,7 @@
 
 #include "app/tilemap_mode.h"
 #include "app/tileset_mode.h"
+#include "doc/algorithm/flip_type.h"
 #include "doc/color.h"
 #include "doc/frame.h"
 #include "doc/image_ref.h"
@@ -75,6 +76,16 @@ void clear_mask_from_cel(CmdSequence* cmds,
                          doc::Cel* cel,
                          const TilemapMode tilemapMode,
                          const TilesetMode tilesetMode);
+
+// Flips the positions of the tiles of a hexagonal tilemap cel around
+// the axis of the grid closest to the center of "bounds" (e.g. the
+// sprite bounds), keeping the stagger of the grid (the tiles aren't
+// flipped, like in orthogonal tilemaps). Returns false (and nothing is
+// changed) if the tiles of the grid can't be flipped on that axis.
+bool flip_hex_tilemap_cel(CmdSequence* cmds,
+                          doc::Cel* cel,
+                          const gfx::Rect& bounds,
+                          doc::algorithm::FlipType flipType);
 
 void move_tiles_in_tileset(CmdSequence* cmds,
                            doc::Tileset* tileset,

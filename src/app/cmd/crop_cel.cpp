@@ -33,14 +33,34 @@ CropCel::CropCel(Cel* cel, const gfx::Rect& newBounds)
   ASSERT(m_newBounds != m_oldBounds);
 }
 
+CropCel::CropCel(Cel* cel, const gfx::Rect& newTiles, Tiles)
+  : WithCel(cel)
+  , m_oldOrigin(cel->position())
+  , m_tiles(true)
+{
+  ASSERT(cel->layer()->isTilemap());
+  doc::Grid grid = static_cast<LayerTilemap*>(cel->layer())->tileset()->grid();
+  grid.origin(cel->position());
+
+  m_newTiles = grid.alignTilesToStagger(newTiles);
+  m_newOrigin = grid.tilemapPosition(m_newTiles.origin());
+  m_oldTiles = gfx::Rect(-m_newTiles.origin(), cel->image()->size());
+}
+
 void CropCel::onExecute()
 {
-  cropImage(m_newOrigin, m_newBounds);
+  if (m_tiles)
+    cropTiles(m_newOrigin, m_newTiles);
+  else
+    cropImage(m_newOrigin, m_newBounds);
 }
 
 void CropCel::onUndo()
 {
-  cropImage(m_oldOrigin, m_oldBounds);
+  if (m_tiles)
+    cropTiles(m_oldOrigin, m_oldTiles);
+  else
+    cropImage(m_oldOrigin, m_oldBounds);
 }
 
 // Crops the cel image leaving the same ID in the image.
@@ -56,7 +76,19 @@ void CropCel::cropImage(const gfx::Point& origin, const gfx::Rect& bounds)
       localBounds = grid.canvasToTile(bounds);
     }
   }
-  if (bounds != cel->image()->bounds()) {
+  cropImage(origin, bounds != cel->image()->bounds(), localBounds);
+}
+
+void CropCel::cropTiles(const gfx::Point& origin, const gfx::Rect& tiles)
+{
+  cropImage(origin, tiles != cel()->image()->bounds(), tiles);
+}
+
+void CropCel::cropImage(const gfx::Point& origin, const bool crop, const gfx::Rect& localBounds)
+{
+  Cel* cel = this->cel();
+
+  if (crop) {
     ImageRef image(crop_image(cel->image(),
                               localBounds.x,
                               localBounds.y,

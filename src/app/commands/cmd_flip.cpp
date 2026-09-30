@@ -29,6 +29,7 @@
 #include "app/ui/status_bar.h"
 #include "app/ui/timeline/timeline.h"
 #include "app/ui/toolbar.h"
+#include "app/util/cel_ops.h"
 #include "app/util/expand_cel_canvas.h"
 #include "doc/algorithm/flip_image.h"
 #include "doc/cel.h"
@@ -102,6 +103,7 @@ void FlipCommand::onExecute(Context* ctx)
   DocApi api = document->getApi(tx);
 
   Mask* mask = document->mask();
+  bool hexTilemapsNotFlipped = false;
   if (m_flipMask && document->isMaskVisible()) {
     Site site = writer.site();
 
@@ -173,6 +175,12 @@ void FlipCommand::onExecute(Context* ctx)
 
         tx(new cmd::SetCelBoundsF(cel, bounds));
       }
+      // Hexagonal tilemaps keep the stagger of their grid
+      else if (cel->layer()->isTilemap() && cel->grid().isHexagonal()) {
+        if (!flip_hex_tilemap_cel(tx, cel, sprite->bounds(), m_flipType))
+          hexTilemapsNotFlipped = true;
+        continue;
+      }
       else {
         api.setCelPosition(sprite,
                            cel,
@@ -205,6 +213,9 @@ void FlipCommand::onExecute(Context* ctx)
   }
 
   tx.commit();
+
+  if (hexTilemapsNotFlipped && ctx->isUIAvailable())
+    StatusBar::instance()->showTip(1000, Strings::statusbar_tips_cannot_flip_hex_tilemap());
 
   update_screen_for_document(document);
 }

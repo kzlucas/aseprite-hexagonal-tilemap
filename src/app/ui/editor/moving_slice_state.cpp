@@ -76,7 +76,13 @@ MovingSliceState::MovingSliceState(Editor* editor,
     m_site.tilesetMode(TilesetMode::Auto);
   }
 
-  if (editor->slicesTransforms() && !m_items.empty()) {
+  // The content of slices isn't transformed with hexagonal tiles
+  // (they can only be moved, not scaled)
+  m_transformContent = (editor->slicesTransforms() &&
+                        !(m_site.tilemapMode() == TilemapMode::Tiles &&
+                          m_site.grid().isHexagonal()));
+
+  if (m_transformContent && !m_items.empty()) {
     view::Range range = m_site.range();
     SelectedLayers selectedLayers = range.selectedLayers();
     // Do not take into account invisible layers.
@@ -130,7 +136,7 @@ void MovingSliceState::initializeItemsContent()
 
 void MovingSliceState::onEnterState(Editor* editor)
 {
-  if (editor->slicesTransforms() && !m_items.empty()) {
+  if (m_transformContent && !m_items.empty()) {
     initializeItemsContent();
 
     // Clear brush preview, as the extra cel will be replaced with the
@@ -160,7 +166,7 @@ bool MovingSliceState::onMouseUp(Editor* editor, MouseMessage* msg)
       cmds->addAndExecute(writer.context(),
                           new cmd::SetSliceKey(item.slice, m_keyFrame, item.newKey));
 
-      if (editor->slicesTransforms()) {
+      if (m_transformContent) {
         for (int i = 0; i < m_selectedLayers.size(); ++i) {
           auto* layer = m_selectedLayers[i];
           m_site.layer(layer);
@@ -342,7 +348,7 @@ bool MovingSliceState::onMouseMove(Editor* editor, MouseMessage* msg)
   gfx::Rect totalBounds = selectedSlicesBounds();
 
   // Move by tile size under Tiles mode.
-  if (editor->slicesTransforms() && m_site.tilemapMode() == TilemapMode::Tiles) {
+  if (m_transformContent && m_site.tilemapMode() == TilemapMode::Tiles) {
     delta = m_site.grid().tileToCanvas(m_site.grid().canvasToTile(delta));
   }
 
@@ -422,7 +428,7 @@ bool MovingSliceState::onMouseMove(Editor* editor, MouseMessage* msg)
     }
 
     // Align slice origin to tiles origin under Tiles mode.
-    if (editor->slicesTransforms() && m_site.tilemapMode() == TilemapMode::Tiles) {
+    if (m_transformContent && m_site.tilemapMode() == TilemapMode::Tiles) {
       rc.setOrigin(m_site.grid().tileToCanvas(m_site.grid().canvasToTile(rc.origin())));
     }
 
@@ -439,7 +445,7 @@ bool MovingSliceState::onMouseMove(Editor* editor, MouseMessage* msg)
     item.slice->insert(m_keyFrame, key);
   }
 
-  if (editor->slicesTransforms())
+  if (m_transformContent)
     drawExtraCel();
 
   // Notify changes

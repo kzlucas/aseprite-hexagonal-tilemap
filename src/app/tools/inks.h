@@ -59,6 +59,18 @@ public:
     m_proc->prepareUForPointShapeSlicedScanline(loop, leftSlice, x1);
   }
 
+  // True if the coordinates received by the ink are tiles: the tile
+  // point shape, or the flood fill of a tilemap (magic wand with
+  // hexagonal tiles)
+  static bool areTileCoordinates(ToolLoop* loop)
+  {
+    if (loop->getPointShape()->isTile())
+      return true;
+    const Image* floodFillSrc = loop->getFloodFillSrcImage();
+    return (loop->getPointShape()->isFloodFill() && floodFillSrc &&
+            floodFillSrc->pixelFormat() == IMAGE_TILEMAP && loop->getGrid().isHexagonal());
+  }
+
   // Common to both SelectionInk and SliceInk
   gfx::Rect tileSelectionToCanvas(int x1, int y, int x2, ToolLoop* loop, bool offset)
   {
@@ -67,7 +79,7 @@ public:
     // For tile point shape, the point shape is done in "tiles"
     // coordinates, but we want the selection in canvas/pixels
     // coordinates.
-    if (loop->getPointShape()->isTile()) {
+    if (areTileCoordinates(loop)) {
       const Grid& grid = loop->getGrid();
       rc = grid.tileToCanvas(rc);
       if (offset) {
@@ -444,6 +456,39 @@ public:
 
   void inkHline(int x1, int y, int x2, ToolLoop* loop) override
   {
+    // Hexagonal tiles are selected (and previewed) with their shape
+    if (areTileCoordinates(loop) && loop->getGrid().isHexagonal()) {
+      const int modifiers = int(loop->getModifiers());
+      for (int u = x1; u <= x2; ++u) {
+        const gfx::Region rgn = loop->getGrid().tileRegionInCanvas(gfx::Point(u, y));
+        for (gfx::Rect rc : rgn) {
+          if (!m_modify_selection) {
+            // Feedback relative to getDstImage() (see tileSelectionToCanvas())
+            rc.offset(-loop->getGrid().origin());
+            if (loop->isSelectionToolLoop()) {
+              rc &= loop->sprite()->bounds();
+              loop->addSelectionToolPoint(rc);
+            }
+            else {
+              rc &= loop->getDstImage()->bounds();
+              for (int v = rc.y; v < rc.y2(); ++v)
+                BaseInk::inkHline(rc.x, v, rc.x2() - 1, loop);
+            }
+          }
+          else if ((modifiers & (int(ToolLoopModifiers::kReplaceSelection) |
+                                 int(ToolLoopModifiers::kAddSelection))) != 0)
+            m_mask.add(rc);
+          else if ((modifiers & int(ToolLoopModifiers::kSubtractSelection)) != 0)
+            m_mask.subtract(rc);
+          else if ((modifiers & int(ToolLoopModifiers::kIntersectSelection)) != 0)
+            m_intersectMask.add(rc);
+        }
+        if (m_modify_selection)
+          m_maxBounds |= rgn.bounds();
+      }
+      return;
+    }
+
     // Map tile coords to canvas if needed
     gfx::Rect rc(BaseInk::tileSelectionToCanvas(x1, y, x2, loop, !m_modify_selection));
 

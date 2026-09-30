@@ -42,6 +42,8 @@ add_library(doc-lib
   frames_sequence.cpp
   grid.cpp
   grid_io.cpp
+  grid_properties.cpp
+  hex_tiles.cpp
   image.cpp
   image_impl.cpp
   image_io.cpp

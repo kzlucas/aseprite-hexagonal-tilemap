@@ -350,6 +350,7 @@ target_sources(app-lib PRIVATE
   cmd/set_tile_data_properties.cpp
   cmd/set_tile_data_property.cpp
   cmd/set_tileset_base_index.cpp
+  cmd/set_tileset_grid.cpp
   cmd/set_tileset_match_flags.cpp
   cmd/set_tileset_name.cpp
   cmd/set_total_frames.cpp
@@ -660,6 +661,7 @@ target_sources(app-lib PRIVATE
   ui/font_entry.cpp
   ui/font_popup.cpp
   ui/hex_color_entry.cpp
+  ui/hex_grid_widgets.cpp
   ui/home_view.cpp
   ui/icon_button.cpp
   ui/incompat_file_window.cpp

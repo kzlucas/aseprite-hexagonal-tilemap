@@ -57,7 +57,7 @@ ClearSlices::ClearSlices(const Site& site,
     color_t bgcolor = doc->bgColor(layer);
     if (image->pixelFormat() == IMAGE_TILEMAP) {
       auto grid = cel->grid();
-      imageBounds = gfx::Rect(grid.canvasToTile(cel->position()), cel->image()->size());
+      imageBounds = gfx::Rect(grid.originToTile(cel->position()), cel->image()->size());
       maskBounds = grid.canvasToTile(maskBounds);
       bgcolor = doc::notile; // TODO configurable empty tile
     }

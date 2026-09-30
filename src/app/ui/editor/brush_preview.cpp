@@ -342,10 +342,33 @@ void BrushPreview::show(const gfx::Point& screenPos)
     }
 
     gfx::Rect extraCelBounds;
-    if (tilemapMode == TilemapMode::Tiles) {
+    // Canvas area modified by the preview
+    gfx::Rect previewBounds = extraCelBoundsInCanvas;
+    const bool hexTiles = (tilemapMode == TilemapMode::Tiles && grid.isHexagonal());
+    gfx::Point hexTileCenter;
+    if (hexTiles) {
+      // The extra cel is a patch with the whole tilemap and the tile
+      // under the mouse (hexagonal tiles overlap, so a patch with only
+      // the bounds of the tile would hide parts of its neighbors), and
+      // it must start at a multiple of the stagger period.
+      ASSERT(layer->isTilemap());
+      const gfx::Point hoverTile = grid.canvasToTile(spritePos);
+      extraCelBounds = gfx::Rect(hoverTile, gfx::Size(1, 1));
+      if (const Cel* cel = site.cel())
+        extraCelBounds |= gfx::Rect(gfx::Point(0, 0), cel->image()->size());
+      extraCelBounds = grid.alignTilesToStagger(extraCelBounds);
+      extraCelBoundsInCanvas = gfx::Rect(grid.tilemapPosition(extraCelBounds.origin()),
+                                         grid.tilemapSizeToCanvas(extraCelBounds.size()));
+      previewBounds = grid.tileBoundsInCanvas(hoverTile);
+      // A pixel inside the tile (the corner of its bounds can be a
+      // pixel of a neighbor tile)
+      hexTileCenter = grid.tileToCanvas(hoverTile) + grid.tileCenter();
+    }
+    else if (tilemapMode == TilemapMode::Tiles) {
       ASSERT(layer->isTilemap());
       extraCelBounds = grid.canvasToTile(extraCelBoundsInCanvas);
       extraCelBoundsInCanvas = grid.tileToCanvas(extraCelBounds);
+      previewBounds = extraCelBoundsInCanvas;
     }
     else {
       extraCelBounds = extraCelBoundsInCanvas;
@@ -394,7 +417,14 @@ void BrushPreview::show(const gfx::Point& screenPos)
       clear_image(extraImage, (extraImage->pixelFormat() == IMAGE_INDEXED ? mask_index : 0));
     }
 
-    if (layer) {
+    if (layer && hexTiles) {
+      // Copy the tiles of the current cel in the patch
+      if (const Cel* cel = site.cel())
+        copy_image(extraImage, cel->image(), -extraCelBounds.x, -extraCelBounds.y);
+
+      m_extraCel->setType(render::ExtraType::PATCH);
+    }
+    else if (layer) {
       render::Render().renderLayer(extraImage,
                                    layer,
                                    site.frame(),
@@ -415,6 +445,8 @@ void BrushPreview::show(const gfx::Point& screenPos)
         loop->getPointShape()->preparePointShape(loop.get());
 
         tools::Stroke::Pt pt(brushBounds.x - origBrushBounds.x, brushBounds.y - origBrushBounds.y);
+        if (hexTiles)
+          pt = tools::Stroke::Pt(hexTileCenter.x, hexTileCenter.y);
         pt.size = brush->size();
         pt.angle = brush->angle();
         loop->getPointShape()->transformPoint(loop.get(), pt);
@@ -422,7 +454,7 @@ void BrushPreview::show(const gfx::Point& screenPos)
     }
 
     document->notifySpritePixelsModified(sprite,
-                                         gfx::Region(m_lastBounds = extraCelBoundsInCanvas),
+                                         gfx::Region(m_lastBounds = previewBounds),
                                          m_lastFrame = site.frame());
 
     m_withRealPreview = true;
@@ -644,7 +676,8 @@ void BrushPreview::createBoundaries(const Site& site, const gfx::Point& spritePo
 
   // Re-use current boundaries if they are still valid.
   if ((tilemapMode == TilemapMode::Pixels ||
-       (tilemapMode == TilemapMode::Tiles && m_lastLayer == currentLayer)) &&
+       (tilemapMode == TilemapMode::Tiles && m_lastLayer == currentLayer &&
+        !site.grid().isHexagonal())) &&
       tilemapMode == m_lastTilemapMode && !m_brushBoundaries.isEmpty() &&
       m_brushGen == brush->gen()) {
     return;
@@ -658,8 +691,15 @@ void BrushPreview::createBoundaries(const Site& site, const gfx::Point& spritePo
   Image* mask = nullptr;
   bool deleteMask = true;
   if (tilemapMode == TilemapMode::Tiles) {
-    mask = Image::create(IMAGE_BITMAP, site.grid().tileSize().w, site.grid().tileSize().h);
-    mask->clear((color_t)1);
+    const doc::Grid grid = site.grid();
+    // The boundaries of a hexagonal tile follow its mask
+    if (grid.isHexagonal() && grid.hasMask()) {
+      mask = Image::createCopy(grid.mask().get());
+    }
+    else {
+      mask = Image::create(IMAGE_BITMAP, grid.tileSize().w, grid.tileSize().h);
+      mask->clear((color_t)1);
+    }
   }
   else if (isOnePixel) {
     mask = Image::create(IMAGE_BITMAP, 1, 1);

@@ -67,6 +67,21 @@ public:
 
     // Use mask
     if (loop->useMask()) {
+      // Hexagonal tiles are inside the selection if their center is
+      // inside it
+      const doc::Grid& grid = loop->getGrid();
+      if (grid.isHexagonal() && loop->getDstImage()->pixelFormat() == IMAGE_TILEMAP) {
+        const Mask* mask = loop->getMask();
+        static_cast<Derived*>(this)->initIterators(loop, x1, y);
+        for (x = x1; x <= x2; ++x) {
+          const Point center = grid.tileToCanvas(Point(x, y)) + grid.tileCenter();
+          if (mask->containsPoint(center.x, center.y))
+            static_cast<Derived*>(this)->processPixel(x, y);
+          static_cast<Derived*>(this)->moveIterators();
+        }
+        return;
+      }
+
       Point maskOrigin(loop->getMaskOrigin());
       const Rect& maskBounds(loop->getMask()->bounds());
 

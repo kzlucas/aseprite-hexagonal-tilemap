@@ -12,9 +12,12 @@
 #include "app/ui/editor/transform_handles.h"
 
 #include "app/pref/preferences.h"
+#include "app/site.h"
 #include "app/ui/editor/editor.h"
 #include "app/ui/skin/skin_theme.h"
 #include "base/pi.h"
+#include "doc/grid.h"
+#include "doc/layer.h"
 #include "os/surface.h"
 
 #include <algorithm>
@@ -54,10 +57,22 @@ static struct HandlesInfo {
   { 2, 2, (PI * 315.0 / 180.0), { ScaleSEHandle, RotateSEHandle } },
 };
 
+// Hexagonal tiles can only be moved (they can't be scaled, rotated,
+// or skewed), so they don't have handles.
+static bool are_hex_tiles(Editor* editor)
+{
+  const Site site = editor->getSite();
+  return (site.tilemapMode() == TilemapMode::Tiles && site.layer() && site.layer()->isTilemap() &&
+          site.grid().isHexagonal());
+}
+
 HandleType TransformHandles::getHandleAtPoint(Editor* editor,
                                               const gfx::Point& pt,
                                               const Transformation& transform)
 {
+  if (are_hex_tiles(editor))
+    return NoHandle;
+
   auto theme = SkinTheme::get(editor);
   os::Surface* gfx = theme->parts.transformationHandle()->bitmap(0);
   double angle = transform.angle();
@@ -91,6 +106,9 @@ HandleType TransformHandles::getHandleAtPoint(Editor* editor,
 
 void TransformHandles::drawHandles(Editor* editor, ui::Graphics* g, const Transformation& transform)
 {
+  if (are_hex_tiles(editor))
+    return;
+
   double angle = transform.angle();
 
   auto corners = transform.transformedCorners();

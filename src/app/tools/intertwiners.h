@@ -785,17 +785,12 @@ private:
       a.offset(-loop->getCelOrigin());
 
       if (m_tempTileset) {
-        forEachTilePos(loop,
-                       m_dstGrid.tilesInCanvasRegion(gfx::Region(a)),
-                       [loop](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
-                         loop->getDstImage()->copy(existentTileImage.get(),
-                                                   gfx::Clip(tilePos.x,
-                                                             tilePos.y,
-                                                             0,
-                                                             0,
-                                                             existentTileImage->width(),
-                                                             existentTileImage->height()));
-                       });
+        forEachTilePos(
+          loop,
+          m_dstGrid.tilesInCanvasRegion(gfx::Region(a)),
+          [this, loop](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
+            copyTileToImage(loop->getDstImage(), existentTileImage.get(), tilePos);
+          });
       }
 
       ImageRef i(crop_image(loop->getDstImage(), a, loop->getDstImage()->maskColor()));
@@ -827,8 +822,9 @@ private:
           loop,
           m_dstGrid.tilesInCanvasRegion(gfx::Region(r)),
           [this, i, r](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
-            existentTileImage->copy(m_savedAreas[i].img.get(),
-                                    gfx::Clip(r.x - tilePos.x, r.y - tilePos.y, 0, 0, r.w, r.h));
+            copyImageToTile(existentTileImage.get(),
+                            m_savedAreas[i].img.get(),
+                            gfx::Clip(r.x - tilePos.x, r.y - tilePos.y, 0, 0, r.w, r.h));
           });
       }
 
@@ -847,25 +843,66 @@ private:
 
     r.offset(-loop->getCelOrigin());
     auto tilesPts = m_dstGrid.tilesInCanvasRegion(gfx::Region(r));
-    forEachTilePos(loop,
-                   tilesPts,
-                   [loop, r](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
-                     existentTileImage->copy(loop->getDstImage(),
-                                             gfx::Clip(r.x - tilePos.x, r.y - tilePos.y, r));
-                   });
+    forEachTilePos(
+      loop,
+      tilesPts,
+      [this, loop, r](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
+        copyImageToTile(existentTileImage.get(),
+                        loop->getDstImage(),
+                        gfx::Clip(r.x - tilePos.x, r.y - tilePos.y, r));
+      });
 
     if (tilesPts.size() > 1) {
       forEachTilePos(loop,
                      tilesPts,
-                     [loop](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
-                       loop->getDstImage()->copy(existentTileImage.get(),
-                                                 gfx::Clip(tilePos.x,
-                                                           tilePos.y,
-                                                           0,
-                                                           0,
-                                                           existentTileImage->width(),
-                                                           existentTileImage->height()));
+                     [this, loop](const doc::ImageRef existentTileImage, const gfx::Point tilePos) {
+                       copyTileToImage(loop->getDstImage(), existentTileImage.get(), tilePos);
                      });
+    }
+  }
+
+  // Copies the pixels of a tile image in the given image position (the
+  // pixels of a hexagonal tile outside its mask are pixels of its
+  // neighbors, so they aren't copied)
+  void copyTileToImage(doc::Image* dst, const doc::Image* tileImage, const gfx::Point& tilePos)
+  {
+    if (!m_grid.hasMask()) {
+      dst->copy(tileImage,
+                gfx::Clip(tilePos.x, tilePos.y, 0, 0, tileImage->width(), tileImage->height()));
+      return;
+    }
+    const doc::Image* mask = m_grid.mask().get();
+    gfx::Clip area(tilePos.x, tilePos.y, 0, 0, tileImage->width(), tileImage->height());
+    if (!area.clip(dst->width(), dst->height(), tileImage->width(), tileImage->height()))
+      return;
+    for (int y = 0; y < area.size.h; ++y) {
+      for (int x = 0; x < area.size.w; ++x) {
+        const int u = area.src.x + x;
+        const int v = area.src.y + y;
+        if (mask->getPixel(u, v))
+          dst->putPixel(area.dst.x + x, area.dst.y + y, tileImage->getPixel(u, v));
+      }
+    }
+  }
+
+  // Copies pixels of an image in a tile image (only the pixels inside
+  // the mask of a hexagonal tile)
+  void copyImageToTile(doc::Image* tileImage, const doc::Image* src, gfx::Clip area)
+  {
+    if (!m_grid.hasMask()) {
+      tileImage->copy(src, area);
+      return;
+    }
+    const doc::Image* mask = m_grid.mask().get();
+    if (!area.clip(tileImage->width(), tileImage->height(), src->width(), src->height()))
+      return;
+    for (int y = 0; y < area.size.h; ++y) {
+      for (int x = 0; x < area.size.w; ++x) {
+        const int u = area.dst.x + x;
+        const int v = area.dst.y + y;
+        if (mask->getPixel(u, v))
+          tileImage->putPixel(u, v, src->getPixel(area.src.x + x, area.src.y + y));
+      }
     }
   }
 
@@ -884,8 +921,12 @@ private:
     const Image* tilemapImage = loop->getCel()->image();
 
     // Offset to convert a tile from dstImage coordinates to tilemap
-    // image coordinates (to get the tile from the original tilemap)
-    const gfx::Point tilePt0 = m_celGrid.canvasToTile(gfx::Point(0, 0));
+    // image coordinates (to get the tile from the original tilemap).
+    // The dstImage of hexagonal tilemaps starts at the first tile of an
+    // aligned tile of the cel (getCelOrigin()).
+    const gfx::Point tilePt0 = (m_celGrid.isHexagonal() ?
+                                  m_celGrid.originToTile(loop->getCelOrigin()) :
+                                  m_celGrid.canvasToTile(gfx::Point(0, 0)));
 
     for (const gfx::Point& tilePt : tilesPts) {
       const gfx::Point tilePtInTilemap = tilePt0 + tilePt;

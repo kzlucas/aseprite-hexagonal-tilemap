@@ -398,6 +398,14 @@ gfx::RectF MovingCelState::calcFullBounds() const
 
 void MovingCelState::snapOffsetToGrid(gfx::Point& offset) const
 {
+  // Hexagonal tilemaps are moved by multiples of two rows/columns (so
+  // their tiles stay in the same lattice)
+  const doc::Grid grid = m_editor->getSite().grid();
+  if (grid.isHexagonal()) {
+    offset = snap_to_hex_stagger_period(grid, offset);
+    return;
+  }
+
   const gfx::RectF& gridBounds = m_editor->getSite().gridBounds();
   const gfx::RectF displaceGrid(gridBounds.origin() + m_pivotOffset, gridBounds.size());
   offset = snap_to_grid(displaceGrid,

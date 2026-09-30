@@ -28,9 +28,11 @@
 #include "base/string.h"
 #include "doc/algorithm/shrink_bounds.h"
 #include "doc/cel.h"
+#include "doc/grid.h"
 #include "doc/image.h"
 #include "doc/images_map.h"
 #include "doc/layer.h"
+#include "doc/layer_tilemap.h"
 #include "doc/palette.h"
 #include "doc/primitives.h"
 #include "doc/selected_frames.h"
@@ -38,6 +40,8 @@
 #include "doc/slice.h"
 #include "doc/sprite.h"
 #include "doc/tag.h"
+#include "doc/tileset.h"
+#include "doc/tilesets.h"
 #include "gfx/packing_rects.h"
 #include "gfx/rect_io.h"
 #include "gfx/size.h"
@@ -1754,6 +1758,89 @@ void DocExporter::createDataFile(const Samples& samples, std::ostream& os, doc::
       }
     }
     os << "\n  ]";
+  }
+
+  // meta.tilesets (only when there are hexagonal tilesets, so the
+  // output for orthogonal tilesets is the same as the official version)
+  {
+    // Items of only one image (e.g. tiles of an exported tileset) are
+    // included too
+    std::vector<Sprite*> sprites;
+    bool hexTilesets = false;
+    for (auto& item : m_documents) {
+      Sprite* sprite = item.doc->sprite();
+      if (std::find(sprites.begin(), sprites.end(), sprite) != sprites.end())
+        continue;
+      sprites.push_back(sprite);
+      if (Tilesets* tilesets = sprite->tilesets()) {
+        for (const Tileset* tileset : *tilesets)
+          if (tileset && tileset->grid().isHexagonal())
+            hexTilesets = true;
+      }
+    }
+
+    if (hexTilesets) {
+      bool firstTileset = true;
+      os << ",\n"
+         << "  \"tilesets\": [";
+      for (Sprite* sprite : sprites) {
+        Tilesets* tilesets = sprite->tilesets();
+        if (!tilesets)
+          continue;
+        for (tileset_index tsi = 0; tsi < tilesets->size(); ++tsi) {
+          const Tileset* tileset = tilesets->get(tsi);
+          if (!tileset)
+            continue;
+          if (firstTileset)
+            firstTileset = false;
+          else
+            os << ",";
+
+          const Grid& grid = tileset->grid();
+          os << "\n   { \"index\": " << tsi << ", \"name\": \"" << escape_for_json(tileset->name())
+             << "\""
+             << ", \"tileSize\": { \"w\": " << grid.tileSize().w << ", \"h\": " << grid.tileSize().h
+             << " }"
+             << ", \"shape\": \""
+             << (grid.type() == Grid::Type::HexPointyTop ? "hexPointyTop" :
+                 grid.type() == Grid::Type::HexFlatTop   ? "hexFlatTop" :
+                                                           "square")
+             << "\"";
+
+          // Hexagonal settings: rows (pointy-top) or columns (flat-top)
+          // shifted by half a tile, distance between rows/columns, and
+          // the pixels of each tile ('#')
+          if (grid.isHexagonal()) {
+            os << ", \"parity\": \"" << (grid.parity() == Grid::Parity::Even ? "even" : "odd")
+               << "\", \"step\": " << grid.hexStep();
+            if (grid.hasMask()) {
+              const Image* mask = grid.mask().get();
+              os << ", \"mask\": [";
+              for (int y = 0; y < mask->height(); ++y) {
+                os << (y > 0 ? ", \"" : "\"");
+                for (int x = 0; x < mask->width(); ++x)
+                  os << (mask->getPixel(x, y) ? '#' : '.');
+                os << "\"";
+              }
+              os << "]";
+            }
+          }
+
+          // Tilemap layers that use this tileset
+          os << ", \"layers\": [";
+          bool firstLayer = true;
+          for (const Layer* layer : sprite->allLayers()) {
+            if (layer->isTilemap() &&
+                static_cast<const LayerTilemap*>(layer)->tilesetIndex() == tsi) {
+              os << (firstLayer ? "\"" : ", \"") << escape_for_json(layer->name()) << "\"";
+              firstLayer = false;
+            }
+          }
+          os << "]" << tileset->userData() << " }";
+        }
+      }
+      os << "\n  ]";
+    }
   }
 
   os << "\n }\n"

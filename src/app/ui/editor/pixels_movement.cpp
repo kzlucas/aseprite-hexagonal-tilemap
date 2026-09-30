@@ -40,6 +40,7 @@
 #include "doc/algorithm/shift_image.h"
 #include "doc/blend_internals.h"
 #include "doc/cel.h"
+#include "doc/hex_tiles.h"
 #include "doc/image.h"
 #include "doc/layer.h"
 #include "doc/mask.h"
@@ -146,6 +147,8 @@ PixelsMovement::PixelsMovement(Context* context,
   m_initialMask.reset(new Mask(*mask));
   m_initialMask0.reset(new Mask(*mask));
   m_currentMask.reset(new Mask(*mask));
+  if (isHexTiles())
+    initHexTiles();
 
   m_pivotVisConn = Preferences::instance().selection.pivotVisibility.AfterChange.connect(
     [this] { onPivotChange(); });
@@ -203,9 +206,26 @@ void PixelsMovement::setFastMode(const bool fastMode)
 
 void PixelsMovement::flipImage(doc::algorithm::FlipType flipType)
 {
+  const gfx::Point oldMaskPos = m_initialMask->bounds().origin();
+  if (!flipOriginalImage(flipType)) {
+    StatusBar::instance()->showTip(1000, Strings::statusbar_tips_cannot_flip_hex_tiles());
+    return;
+  }
+
   m_innerCmds.push_back(InnerCmd::MakeFlip(flipType));
 
-  flipOriginalImage(flipType);
+  // Flipped hexagonal tiles can be displaced to keep them in the
+  // grid, so we move the transformation with the mask
+  if (isHexTiles()) {
+    const gfx::PointF shift(m_initialMask->bounds().origin() - oldMaskPos);
+    for (Transformation* t : { &m_initialData, &m_currentData }) {
+      gfx::RectF bounds = t->bounds();
+      bounds.offset(shift);
+      t->bounds(bounds);
+      t->pivot(t->pivot() + shift);
+    }
+    m_document->setTransformation(m_currentData);
+  }
 
   {
     ContextWriter writer(m_reader, 1000);
@@ -222,6 +242,26 @@ void PixelsMovement::flipImage(doc::algorithm::FlipType flipType)
 
 void PixelsMovement::rotate(double angle)
 {
+  // Hexagonal tiles can be rotated 180 degrees (flipping them in both
+  // axes), but not 90 degrees (a pointy-top hexagon would be a
+  // flat-top one)
+  if (isHexTiles()) {
+    const doc::Grid grid = m_site.grid();
+    const doc::tile_flags flips = doc::tile_f_xflip | doc::tile_f_yflip;
+    if (std::fabs(std::fabs(angle) - 180.0) < 0.01 && (grid.validTileFlags() & flips) == flips) {
+      // The flip across the stagger can fail (e.g. staggered bricks),
+      // so it's the first one
+      const bool flat = (grid.type() == doc::Grid::Type::HexFlatTop);
+      const size_t n = m_innerCmds.size();
+      flipImage(flat ? doc::algorithm::FlipVertical : doc::algorithm::FlipHorizontal);
+      if (m_innerCmds.size() > n)
+        flipImage(flat ? doc::algorithm::FlipHorizontal : doc::algorithm::FlipVertical);
+    }
+    else
+      StatusBar::instance()->showTip(1000, Strings::statusbar_tips_cannot_rotate_hex_tiles());
+    return;
+  }
+
   ContextWriter writer(m_reader, 1000);
   m_currentData.angle(base::fmod_radians(m_currentData.angle() + PI * -angle / 180.0));
 
@@ -236,6 +276,10 @@ void PixelsMovement::rotate(double angle)
 
 void PixelsMovement::shift(int dx, int dy)
 {
+  // Cannot wrap hexagonal tiles (it would change their stagger)
+  if (isHexTiles())
+    return;
+
   const double angle = m_currentData.angle();
   m_innerCmds.push_back(InnerCmd::MakeShift(dx, dy, angle));
   shiftOriginalImage(dx, dy, angle);
@@ -255,7 +299,22 @@ void PixelsMovement::setTransformation(const Transformation& t)
 {
   m_initialData = m_currentData;
 
-  setTransformationBase(t);
+  // Hexagonal tiles can only be moved between tiles of the grid
+  if (isHexTiles()) {
+    const doc::Grid grid = m_site.grid();
+    const gfx::Point from = grid.tileToCanvas(grid.canvasToTile(m_initialMask->bounds().center())) +
+                            grid.tileCenter();
+    const gfx::Point delta = doc::hex_tiles_delta(
+      grid,
+      from,
+      from + gfx::Point(t.bounds().origin()) - m_initialMask->bounds().origin());
+    Transformation hexT(m_currentData);
+    hexT.bounds(gfx::RectF(m_initialMask->bounds()).offset(gfx::PointF(delta)));
+    hexT.pivot(m_currentData.pivot() + hexT.bounds().origin() - m_currentData.bounds().origin());
+    setTransformationBase(hexT);
+  }
+  else
+    setTransformationBase(t);
 
   redrawCurrentMask();
   updateDocumentMask();
@@ -386,7 +445,14 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
   switch (m_handle) {
     case MovePixelsHandle: {
       double dx, dy;
-      if (tilesModeOn) {
+      if (isHexTiles()) {
+        const gfx::Point delta = hexMoveDelta(pos, moveModifier);
+        bounds.offset(gfx::PointF(delta));
+        newTransformation.pivot(abs_initial_pivot + gfx::PointF(delta));
+        newTransformation.bounds(bounds);
+        break;
+      }
+      else if (tilesModeOn) {
         if (m_catchPos.x == 0 && m_catchPos.y == 0) {
           // Movement through keyboard:
           dx = (pos.x - m_catchPos.x) * m_site.gridBounds().w;
@@ -422,10 +488,14 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
       bounds.offset(dx, dy);
 
       if (!tilesModeOn && (moveModifier & SnapToGridMovement) == SnapToGridMovement) {
-        // Snap the x1,y1 point to the grid.
-        gfx::PointF gridOffset(snap_to_grid(m_site.gridBounds(),
-                                            gfx::Point(bounds.origin()),
-                                            PreferSnapTo::ClosestGridVertex));
+        // Snap the x1,y1 point to the grid (the positions of the tiles
+        // of a hexagonal grid).
+        const doc::Grid grid = m_site.grid();
+        gfx::PointF gridOffset(grid.isHexagonal() ?
+                                 snap_to_hex_tile_position(grid, gfx::Point(bounds.origin())) :
+                                 snap_to_grid(m_site.gridBounds(),
+                                              gfx::Point(bounds.origin()),
+                                              PreferSnapTo::ClosestGridVertex));
 
         // Now we calculate the difference from x1,y1 point and we can
         // use it to adjust all coordinates (x1, y1, x2, y2).
@@ -447,6 +517,10 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
     case ScaleSWHandle:
     case ScaleSHandle:
     case ScaleSEHandle: {
+      // Cannot scale hexagonal tiles
+      if (isHexTiles())
+        break;
+
       static double handles[][2] = {
         { 0.0, 0.0 },
         { 0.5, 0.0 },
@@ -762,13 +836,36 @@ void PixelsMovement::moveImage(const gfx::PointF& pos, MoveModifier moveModifier
 }
 
 void PixelsMovement::getDraggedImageCopy(std::unique_ptr<Image>& outputImage,
-                                         std::unique_ptr<Mask>& outputMask)
+                                         std::unique_ptr<Mask>& outputMask,
+                                         gfx::Point* tilemapPos)
 {
   // Absurd situation: tilemapMode == Tiles and current layer isn't a tilemap
   ASSERT(m_site.tilemapMode() == TilemapMode::Pixels || m_site.layer()->isTilemap());
   gfx::Rect bounds = m_currentData.transformedBounds();
   if (bounds.isEmpty())
     return;
+
+  // The hexagonal tiles are copied like new_tilemap_from_mask() does
+  // (the first tile is the aligned tile at the mask bounds)
+  if (isHexTiles()) {
+    const doc::Grid grid = m_site.grid();
+    std::unique_ptr<Mask> mask(new Mask(*m_currentMask));
+    const gfx::Rect tiles = grid.alignTilesToStagger(grid.canvasToTile(mask->bounds()));
+    std::unique_ptr<Image> image(Image::create(IMAGE_TILEMAP, tiles.w, tiles.h));
+    image->setMaskColor(doc::notile);
+    image->clear(doc::notile);
+    doc::copy_moved_hex_tiles(image.get(),
+                              tiles.origin(),
+                              m_originalImage.get(),
+                              grid.originToTile(m_hexPos),
+                              grid,
+                              hexDelta(m_currentData));
+    outputImage.reset(image.release());
+    outputMask.reset(mask.release());
+    if (tilemapPos)
+      *tilemapPos = grid.tilemapPosition(tiles.origin());
+    return;
+  }
 
   doc::PixelFormat pixelFormat;
   gfx::Size imgSize;
@@ -916,7 +1013,9 @@ void PixelsMovement::stampImage(bool finalStamp)
       // on the other hand 'TilemapMode::Pixels' do not require any additional
       // mask/transformData adjustments.
       if (originalSiteTilemapMode == TilemapMode::Tiles) {
-        if (target->layer()->isTilemap()) {
+        // Hexagonal tiles are selected by their center, so they don't
+        // need aligned masks
+        if (target->layer()->isTilemap() && !targetGrid.isHexagonal()) {
           alignMasksAndTransformData(&initialMask0,
                                      &initialMask,
                                      &currentMask,
@@ -933,7 +1032,8 @@ void PixelsMovement::stampImage(bool finalStamp)
           m_currentMask->replace(currentMask);
           m_initialData.bounds(initialData.bounds());
           m_currentData.bounds(currentData.bounds());
-          m_site.tilemapMode(TilemapMode::Pixels);
+          m_site.tilemapMode(target->layer()->isTilemap() ? TilemapMode::Tiles :
+                                                            TilemapMode::Pixels);
         }
       }
       else {
@@ -980,8 +1080,14 @@ void PixelsMovement::stampExtraCelImage()
   gfx::Size canvasImageSize = image->size();
   if (m_site.tilemapMode() == TilemapMode::Tiles) {
     doc::Grid grid = m_site.grid();
-    dstPt = grid.canvasToTile(cel->position());
-    canvasImageSize = grid.tileToCanvas(gfx::Rect(dstPt, canvasImageSize)).size();
+    if (grid.isHexagonal()) {
+      dstPt = grid.originToTile(cel->position());
+      canvasImageSize = grid.tilemapSizeToCanvas(canvasImageSize);
+    }
+    else {
+      dstPt = grid.canvasToTile(cel->position());
+      canvasImageSize = grid.tileToCanvas(gfx::Rect(dstPt, canvasImageSize)).size();
+    }
   }
   else {
     dstPt = cel->position() - expand.getCel()->position();
@@ -1147,9 +1253,23 @@ void PixelsMovement::redrawExtraImage(Transformation* transformation)
     bounds = transformation->transformedBounds();
   }
 
+  // The extra cel with hexagonal tiles includes the whole tilemap (so
+  // it doesn't hide parts of the tiles around the moved ones), and it
+  // keeps the stagger of the grid
+  gfx::Rect hexTiles;
+  if (isHexTiles()) {
+    hexTiles = hexExtraCelTiles(*transformation);
+    const doc::Grid grid = m_site.grid();
+    bounds = gfx::Rect(grid.tilemapPosition(hexTiles.origin()),
+                       grid.tilemapSizeToCanvas(hexTiles.size()));
+  }
+
   if (!bounds.isEmpty()) {
     gfx::Size extraCelSize;
-    if (m_site.tilemapMode() == TilemapMode::Tiles) {
+    if (isHexTiles()) {
+      extraCelSize = hexTiles.size();
+    }
+    else if (m_site.tilemapMode() == TilemapMode::Tiles) {
       // Transforming tiles
       extraCelSize = m_site.grid().canvasToTile(bounds).size();
       bounds = m_site.grid().alignBounds(bounds);
@@ -1206,7 +1326,24 @@ void PixelsMovement::drawImage(const Transformation& transformation,
     bounds.enlargeYH(m_document->sprite()->height());
   }
 
-  if (m_site.tilemapMode() == TilemapMode::Tiles && m_site.layer()->isTilemap()) {
+  if (isHexTiles()) {
+    dst->setMaskColor(doc::notile);
+    dst->clear(dst->maskColor());
+
+    // "dst" starts at the tile of the grid at "pt"
+    const doc::Grid grid = m_site.grid();
+    const gfx::Point dstOrigin = grid.originToTile(gfx::Point(pt));
+    if (renderOriginalLayer && m_site.cel())
+      dst->copy(m_site.cel()->image(), gfx::Clip(0, 0, gfx::Rect(dstOrigin, dst->size())));
+
+    doc::copy_moved_hex_tiles(dst,
+                              dstOrigin,
+                              m_originalImage.get(),
+                              grid.originToTile(m_hexPos),
+                              grid,
+                              hexDelta(transformation));
+  }
+  else if (m_site.tilemapMode() == TilemapMode::Tiles && m_site.layer()->isTilemap()) {
     dst->setMaskColor(doc::notile);
     dst->clear(dst->maskColor());
 
@@ -1428,8 +1565,19 @@ void PixelsMovement::hideDocumentMask()
   update_screen_for_document(m_document);
 }
 
-void PixelsMovement::flipOriginalImage(const doc::algorithm::FlipType flipType)
+bool PixelsMovement::flipOriginalImage(const doc::algorithm::FlipType flipType)
 {
+  // Flip the positions of hexagonal tiles and their mask (if the mask
+  // of the tiles is symmetric)
+  if (isHexTiles()) {
+    const doc::Grid grid = m_site.grid();
+    gfx::Point origin = grid.originToTile(m_hexPos);
+    if (!doc::flip_hex_tiles(m_originalImage, origin, *m_initialMask, grid, flipType))
+      return false;
+    m_hexPos = grid.tilemapPosition(origin);
+    return true;
+  }
+
   // Flip the image.
   doc::algorithm::flip_image(
     m_originalImage.get(),
@@ -1440,6 +1588,7 @@ void PixelsMovement::flipOriginalImage(const doc::algorithm::FlipType flipType)
   doc::algorithm::flip_image(m_initialMask->bitmap(),
                              gfx::Rect(gfx::Point(0, 0), m_initialMask->bounds().size()),
                              flipType);
+  return true;
 }
 
 void PixelsMovement::shiftOriginalImage(const int dx, const int dy, const double angle)
@@ -1556,6 +1705,8 @@ void PixelsMovement::reproduceAllTransformationsWithInnerCmds()
   m_initialMask->copyFrom(m_initialMask0.get());
   if (m_site.layer()->isTilemap() && m_site.tilemapMode() == TilemapMode::Tiles) {
     m_originalImage.reset(new_tilemap_from_mask(m_site, m_initialMask.get()));
+    if (isHexTiles())
+      initHexTiles();
   }
   else
     m_originalImage.reset(new_image_from_mask(m_site,
@@ -1581,6 +1732,75 @@ void PixelsMovement::reproduceAllTransformationsWithInnerCmds()
   redrawExtraImage();
   redrawCurrentMask();
   updateDocumentMask();
+}
+
+bool PixelsMovement::isHexTiles() const
+{
+  return (m_site.tilemapMode() == TilemapMode::Tiles && m_site.layer() &&
+          m_site.layer()->isTilemap() && m_site.grid().isHexagonal());
+}
+
+void PixelsMovement::initHexTiles()
+{
+  const doc::Grid grid = m_site.grid();
+  gfx::Point origin;
+  if (!m_originalImage ||
+      !doc::find_hex_tiles_origin(m_originalImage.get(), m_initialMask.get(), grid, origin)) {
+    origin = grid.alignTilesToStagger(grid.canvasToTile(m_initialMask->bounds())).origin();
+  }
+  m_hexPos = grid.tilemapPosition(origin);
+}
+
+// Returns the displacement of the tiles (a displacement between tiles
+// of the grid) in the given transformation
+gfx::Point PixelsMovement::hexDelta(const Transformation& transformation) const
+{
+  const gfx::RectF& bounds = transformation.bounds();
+  return gfx::Point(int(std::round(bounds.x)), int(std::round(bounds.y))) -
+         m_initialMask->bounds().origin();
+}
+
+// Returns the displacement between tiles of the grid to move the
+// tiles from m_catchPos to "pos"
+gfx::Point PixelsMovement::hexMoveDelta(const gfx::PointF& pos, MoveModifier moveModifier) const
+{
+  const doc::Grid grid = m_site.grid();
+
+  // Movement through keyboard: "pos" is a number of tiles in the
+  // tilemap (e.g. one row down is down-left or down-right, depending
+  // on the stagger of the row)
+  if (m_catchPos.x == 0 && m_catchPos.y == 0) {
+    const gfx::Point tile = grid.canvasToTile(gfx::Point(m_initialData.bounds().center()));
+    return grid.tileToCanvas(tile + gfx::Point(int(pos.x), int(pos.y))) - grid.tileToCanvas(tile);
+  }
+
+  // Movement through mouse/trackpad: from the tile under m_catchPos
+  // to the tile under "pos"
+  const gfx::Point from(int(std::floor(m_catchPos.x)), int(std::floor(m_catchPos.y)));
+  gfx::Point to(int(std::floor(pos.x)), int(std::floor(pos.y)));
+  if ((moveModifier & LockAxisMovement) == LockAxisMovement) {
+    if (std::abs(to.x - from.x) < std::abs(to.y - from.y))
+      to.x = from.x;
+    else
+      to.y = from.y;
+  }
+  return doc::hex_tiles_delta(grid, from, to);
+}
+
+// Returns the tiles of the grid in the extra cel to show the moved
+// hexagonal tiles
+gfx::Rect PixelsMovement::hexExtraCelTiles(const Transformation& transformation) const
+{
+  const doc::Grid grid = m_site.grid();
+  gfx::Rect tiles = doc::moved_hex_tiles_bounds(m_originalImage.get(),
+                                                grid.originToTile(m_hexPos),
+                                                grid,
+                                                hexDelta(transformation));
+  if (const Cel* cel = m_site.cel())
+    tiles |= gfx::Rect(grid.originToTile(cel->position()), cel->image()->size());
+  if (tiles.isEmpty())
+    return tiles;
+  return grid.alignTilesToStagger(tiles);
 }
 
 #if _DEBUG

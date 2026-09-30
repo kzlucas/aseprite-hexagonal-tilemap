@@ -21,6 +21,13 @@ class CropCel : public Cmd,
 public:
   CropCel(doc::Cel* cel, const gfx::Rect& newBounds);
 
+  // Changes the tiles of a tilemap cel of a hexagonal tileset:
+  // "newTiles" is the new range of tiles in the current tilemap
+  // coordinates, and it's aligned to the stagger of the grid (so the
+  // tiles don't move).
+  struct Tiles {};
+  CropCel(doc::Cel* cel, const gfx::Rect& newTiles, Tiles);
+
 protected:
   void onExecute() override;
   void onUndo() override;
@@ -28,11 +35,17 @@ protected:
 
 private:
   void cropImage(const gfx::Point& origin, const gfx::Rect& bounds);
+  void cropTiles(const gfx::Point& origin, const gfx::Rect& tiles);
+  void cropImage(const gfx::Point& origin, bool crop, const gfx::Rect& localBounds);
 
   gfx::Point m_oldOrigin;
   gfx::Point m_newOrigin;
   gfx::Rect m_oldBounds;
   gfx::Rect m_newBounds;
+  // Ranges of tiles (hexagonal tilesets)
+  bool m_tiles = false;
+  gfx::Rect m_oldTiles;
+  gfx::Rect m_newTiles;
 };
 
 }} // namespace app::cmd

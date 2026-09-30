@@ -35,11 +35,12 @@ std::string tileset_label(const doc::Tileset* tileset, doc::tileset_index tsi)
     name += " (" + tilemapsNames + ")";
   }
 
-  return fmt::format("#{0} ({1}x{2}): {3}",
+  return fmt::format("#{0} ({1}x{2}{4}): {3}",
                      tsi,
                      tileset->grid().tileSize().w,
                      tileset->grid().tileSize().h,
-                     name);
+                     name,
+                     tileset->grid().isHexagonal() ? " hex" : "");
 }
 
 } // namespace app

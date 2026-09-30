@@ -39,6 +39,7 @@
 #include "sprite_size.xml.h"
 
 #include <algorithm>
+#include <cmath>
 
 #define PERC_FORMAT "%.4g"
 
@@ -143,6 +144,18 @@ protected:
         if (newGridSize.h < 1)
           newGridSize.h = 1;
         doc::Grid newGrid(newGridSize);
+
+        // Keep hexagonal grids hexagonal (the step is scaled, and the
+        // automatic mask is generated for the new size)
+        const doc::Grid& oldGrid = tileset->grid();
+        if (oldGrid.isHexagonal()) {
+          const double stepScale = (oldGrid.type() == doc::Grid::Type::HexFlatTop ? scale.w :
+                                                                                    scale.h);
+          newGrid = doc::Grid::MakeHex(newGridSize,
+                                       oldGrid.type(),
+                                       oldGrid.parity(),
+                                       int(std::lround(oldGrid.hexStep() * stepScale)));
+        }
 
         auto newTileset = new doc::Tileset(sprite(), newGrid, tileset->size());
         doc::tile_index idx = 0;

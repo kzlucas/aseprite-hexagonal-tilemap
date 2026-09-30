@@ -132,7 +132,16 @@ ExpandCelCanvas::ExpandCelCanvas(Site site,
     m_bounds = m_grid.canvasToTile(m_bounds);
 
     // New tiles bounds in pixels coordinates.
-    gfx::Rect newBoundsFromTiles = m_grid.tileToCanvas(m_bounds);
+    gfx::Rect newBoundsFromTiles;
+    if (m_grid.isHexagonal()) {
+      // The new tilemap must keep the stagger of the grid
+      m_bounds = m_grid.alignTilesToStagger(m_bounds);
+      newBoundsFromTiles = gfx::Rect(m_grid.tilemapPosition(m_bounds.origin()),
+                                     m_grid.tilemapSizeToCanvas(m_bounds.size()));
+    }
+    else {
+      newBoundsFromTiles = m_grid.tileToCanvas(m_bounds);
+    }
 
     // As the grid origin depends on the current cel position (see
     // Site::grid()), and we're going to modify the m_cel position
@@ -229,7 +238,21 @@ void ExpandCelCanvas::commit()
       gfx::Rect trimBounds = getTrimDstImageBounds();
       if (!trimBounds.isEmpty()) {
         // Convert the image to tiles
-        if (m_layer->isTilemap() && m_tilemapMode == TilemapMode::Pixels) {
+        if (m_layer->isTilemap() && m_tilemapMode == TilemapMode::Pixels && m_grid.isHexagonal()) {
+          // Hexagonal tiles are created in canvas coordinates (the
+          // m_dstImage doesn't start at the first tile of the grid
+          // origin, as it keeps the stagger of the grid)
+          doc::ImageRef newTilemap;
+          draw_image_into_new_tilemap_cel(m_cmds,
+                                          static_cast<doc::LayerTilemap*>(m_layer),
+                                          m_cel,
+                                          m_dstImage.get(),
+                                          m_origCelPos,
+                                          m_bounds.origin(),
+                                          gfx::Rect(trimBounds).offset(m_bounds.origin()),
+                                          newTilemap);
+        }
+        else if (m_layer->isTilemap() && m_tilemapMode == TilemapMode::Pixels) {
           doc::ImageRef newTilemap;
           draw_image_into_new_tilemap_cel(m_cmds,
                                           static_cast<doc::LayerTilemap*>(m_layer),
@@ -242,15 +265,30 @@ void ExpandCelCanvas::commit()
                                           newTilemap);
         }
         else {
-          ImageRef newImage(trimDstImage(trimBounds));
-          ASSERT(newImage);
+          ImageRef newImage;
+          gfx::Point newPosition;
 
-          gfx::Point newPosition = (m_cel->position() +
-                                    // TODO we should get the exact coordinate from
-                                    // getTrimDstImageBounds()
-                                    (m_layer->isTilemap() ?
-                                       m_grid.tileToCanvas(trimBounds.origin()) :
-                                       trimBounds.origin()));
+          // Hexagonal tilemaps are cropped in tiles, keeping the
+          // stagger of the grid
+          if (m_layer->isTilemap() && m_grid.isHexagonal()) {
+            trimBounds = m_grid.alignTilesToStagger(trimBounds);
+            newImage.reset(crop_image(m_dstImage.get(),
+                                      trimBounds.x,
+                                      trimBounds.y,
+                                      trimBounds.w,
+                                      trimBounds.h,
+                                      m_dstImage->maskColor()));
+            newPosition = m_grid.tilemapPosition(trimBounds.origin());
+          }
+          else {
+            newImage = trimDstImage(trimBounds);
+            newPosition = (m_cel->position() +
+                           // TODO we should get the exact coordinate from
+                           // getTrimDstImageBounds()
+                           (m_layer->isTilemap() ? m_grid.tileToCanvas(trimBounds.origin()) :
+                                                   trimBounds.origin()));
+          }
+          ASSERT(newImage);
 
           if (m_celCreated) {
             m_cel->data()->setImage(newImage, m_layer);
@@ -375,6 +413,18 @@ void ExpandCelCanvas::commit()
 
         m_cmds->executeAndAdd(
           new cmd::CopyRegion(m_cel->image(), m_dstImage.get(), *regionToPatch, m_bounds.origin()));
+      }
+      else if (m_tilemapMode == TilemapMode::Tiles && m_grid.isHexagonal()) {
+        ASSERT(m_celImage.get() != m_cel->image());
+
+        // Hexagonal tilemaps are patched in tiles (tiles overlap, so a
+        // region in the canvas doesn't match a region of tiles)
+        m_cel->data()->setImage(m_celImage, m_layer);
+        m_cmds->executeAndAdd(new cmd::PatchCel(m_cel,
+                                                m_dstImage.get(),
+                                                *regionToPatch,
+                                                m_grid.origin(),
+                                                cmd::PatchCel::Tiles()));
       }
       else if (m_tilemapMode == TilemapMode::Tiles) {
         ASSERT(m_celImage.get() != m_cel->image());
@@ -506,8 +556,12 @@ void ExpandCelCanvas::validateSourceCanvas(const gfx::Region& rgn)
   gfx::Point zeroPos;
   if (m_tilemapMode == TilemapMode::Tiles) {
     // Position of the tilemap cel inside the m_dstImage tilemap
-    origCelPos = m_grid.canvasToTile(m_origCelPos);
-    rgnToValidate = m_grid.canvasToTile(rgn);
+    origCelPos = m_grid.originToTile(m_origCelPos);
+    // The same tiles that validateDestCanvas() copies from the source
+    // (with hexagonal grids, the tiles touching each rectangle are a
+    // subset of its tile bounds)
+    for (const auto& rc : rgn)
+      rgnToValidate |= gfx::Region(m_grid.canvasToTile(rc));
   }
   else {
     origCelPos = m_origCelPos;

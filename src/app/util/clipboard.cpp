@@ -46,6 +46,7 @@
 #include "view/cels.h"
 
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 namespace app {
@@ -109,6 +110,9 @@ struct Clipboard::Data {
   // in the color bar
   std::shared_ptr<Tileset> tileset;
 
+  // Canvas position of the first tile of a hexagonal tilemap
+  std::optional<gfx::Point> tilemapPos;
+
   // Selected entries copied from the palette or the tileset
   PalettePicks picks;
 
@@ -136,6 +140,7 @@ struct Clipboard::Data {
     palette.reset();
     tilemap.reset();
     tileset.reset();
+    tilemapPos.reset();
     picks.clear();
     mask.reset();
     range.invalidate();
@@ -282,6 +287,14 @@ bool Clipboard::copyFromDocument(const Site& site, bool merged)
             true, // set native clipboard
             site.layer() && !site.layer()->isBackground());
 
+    // Position of the first tile of the hexagonal tilemap (see
+    // new_tilemap_from_mask())
+    const doc::Grid grid = site.grid();
+    if (grid.isHexagonal() && mask) {
+      m_data->tilemapPos = grid.tilemapPosition(
+        grid.alignTilesToStagger(grid.canvasToTile(mask->bounds())).origin());
+    }
+
     return true;
   }
 
@@ -427,7 +440,8 @@ void Clipboard::copyImage(const Image* image, const Mask* mask, const Palette* p
 void Clipboard::copyTilemap(const Image* image,
                             const Mask* mask,
                             const Palette* pal,
-                            const Tileset* tileset)
+                            const Tileset* tileset,
+                            const gfx::Point* tilemapPos)
 {
   ASSERT(image->pixelFormat() == IMAGE_TILEMAP);
   setData(ImageRef(Image::createCopy(image)),
@@ -437,6 +451,8 @@ void Clipboard::copyTilemap(const Image* image,
           nullptr,
           true,
           false);
+  if (tilemapPos)
+    m_data->tilemapPos = *tilemapPos;
 }
 
 void Clipboard::copyPalette(const Palette* palette, const PalettePicks& picks)
@@ -619,7 +635,11 @@ void Clipboard::paste(Context* ctx, const bool interactive, const gfx::Point* po
         // TODO add post-command parameters (issue #2324)
 
         // Change to MovingTilemapState
-        editor->pasteImage(m_data->tilemap, m_data->mask.get(), position, m_data->tileset.get());
+        editor->pasteImage(m_data->tilemap,
+                           m_data->mask.get(),
+                           position,
+                           m_data->tileset.get(),
+                           (m_data->tilemapPos ? &*m_data->tilemapPos : nullptr));
       }
       else {
         // TODO non-interactive version (for scripts)

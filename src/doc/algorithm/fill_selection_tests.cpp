@@ -73,6 +73,32 @@ TEST(FillSelection, Tilemap)
   EXPECT_TRUE(cmp_img({ 2, 1, 1, 1, 1, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, image.get()));
 }
 
+TEST(FillSelection, HexTilemap)
+{
+  ImageRef image(Image::create(IMAGE_TILEMAP, 4, 4));
+  image->clear(1);
+
+  const Grid grid = Grid::MakeHex(Size(16, 16), Grid::Type::HexPointyTop);
+  const Rect imageBounds(grid.origin(), grid.tilemapSizeToCanvas(image->size()));
+
+  // The bounds of a tile touch pixels of its neighbors, but only the
+  // tile has its center inside
+  Mask mask;
+  mask.replace(grid.tileBoundsInCanvas(Point(1, 1)));
+  algorithm::fill_selection(image.get(), imageBounds, &mask, 2, &grid);
+  EXPECT_TRUE(cmp_img({ 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, image.get()));
+
+  // Only the center pixel of a tile
+  mask.replace(Rect(grid.tileToCanvas(Point(2, 2)) + grid.tileCenter(), Size(1, 1)));
+  algorithm::fill_selection(image.get(), imageBounds, &mask, 3, &grid);
+  EXPECT_TRUE(cmp_img({ 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1 }, image.get()));
+
+  // A pixel of a tile without its center
+  mask.replace(Rect(grid.tileToCanvas(Point(3, 3)), Size(4, 4)));
+  algorithm::fill_selection(image.get(), imageBounds, &mask, 4, &grid);
+  EXPECT_TRUE(cmp_img({ 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 3, 1, 1, 1, 1, 1 }, image.get()));
+}
+
 int main(int argc, char** argv)
 {
   ::testing::InitGoogleTest(&argc, argv);

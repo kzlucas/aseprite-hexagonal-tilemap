@@ -15,6 +15,7 @@
 #include "app/cmd/set_layer_opacity.h"
 #include "app/cmd/set_layer_tileset.h"
 #include "app/cmd/set_tileset_base_index.h"
+#include "app/cmd/set_tileset_grid.h"
 #include "app/cmd/set_tileset_match_flags.h"
 #include "app/cmd/set_tileset_name.h"
 #include "app/cmd/set_user_data.h"
@@ -404,9 +405,14 @@ private:
 
       tilesetInfo = tilesetSel.getInfo();
 
+      // Grid of the selected tileset (it can be a different one)
+      const doc::Tileset* selTileset = tilemap->sprite()->tilesets()->get(tilesetInfo.tsi);
+      const bool gridChanged = (selTileset && selTileset->grid() != tilesetInfo.grid &&
+                                selTileset->grid().tileSize() == tilesetInfo.grid.tileSize());
+
       if (tileset->name() != tilesetInfo.name || tileset->baseIndex() != tilesetInfo.baseIndex ||
           tileset->matchFlags() != tilesetInfo.matchFlags ||
-          tilesetInfo.tsi != tilemap->tilesetIndex()) {
+          tilesetInfo.tsi != tilemap->tilesetIndex() || gridChanged) {
         ContextWriter writer(UIContext::instance());
         Tx tx(writer, "Set Tileset Properties");
         // User changed tilemap's tileset
@@ -420,6 +426,8 @@ private:
           tx(new cmd::SetTilesetBaseIndex(tileset, tilesetInfo.baseIndex));
         if (tileset->matchFlags() != tilesetInfo.matchFlags)
           tx(new cmd::SetTilesetMatchFlags(tileset, tilesetInfo.matchFlags));
+        if (gridChanged)
+          tx(new cmd::SetTilesetGrid(tileset, tilesetInfo.grid));
         // TODO catch the tileset base index modification from the editor
         App::instance()->mainWindow()->invalidate();
         tx.commit();

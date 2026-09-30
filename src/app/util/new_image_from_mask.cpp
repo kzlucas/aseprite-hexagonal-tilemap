@@ -209,6 +209,29 @@ doc::Image* new_tilemap_from_mask(const Site& site, const doc::Mask* srcMask)
   const gfx::Rect& srcBounds = srcMask->bounds();
   const gfx::Rect srcTilesBounds = grid.canvasToTile(srcBounds);
 
+  // Hexagonal tiles are selected if their center is inside the mask,
+  // and the tilemap keeps the stagger of the grid (its first tile is
+  // the origin of the aligned tiles touching the mask bounds, see
+  // doc::find_hex_tiles_origin())
+  if (grid.isHexagonal()) {
+    const gfx::Rect tiles = grid.alignTilesToStagger(srcTilesBounds);
+    const Image* srcImage = srcCel->image();
+    std::unique_ptr<Image> dst(Image::create(IMAGE_TILEMAP, tiles.w, tiles.h));
+    if (!dst)
+      return nullptr;
+    clear_image(dst.get(), doc::notile);
+
+    for (int v = 0; v < tiles.h; ++v) {
+      for (int u = 0; u < tiles.w; ++u) {
+        const gfx::Point tile = tiles.origin() + gfx::Point(u, v);
+        const gfx::Point center = grid.tileToCanvas(tile) + grid.tileCenter();
+        if (srcImage->bounds().contains(tile) && srcMask->containsPoint(center.x, center.y))
+          dst->putPixel(u, v, srcImage->getPixel(tile.x, tile.y));
+      }
+    }
+    return dst.release();
+  }
+
   ASSERT(srcMaskBitmap);
   ASSERT(!srcTilesBounds.isEmpty());
   ASSERT(site.layer()->isTilemap());

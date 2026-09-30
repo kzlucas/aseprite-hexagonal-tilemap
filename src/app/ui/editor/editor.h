@@ -243,10 +243,13 @@ public:
                                const gfx::Point& mousePos,
                                ZoomBehavior zoomBehavior);
 
+  // "tilemapPos" is the canvas position of the first tile of a
+  // hexagonal tilemap (see Clipboard::copyTilemap()).
   void pasteImage(const ImageRef& image,
                   const Mask* mask = nullptr,
                   const gfx::Point* position = nullptr,
-                  const Tileset* srcTileset = nullptr);
+                  const Tileset* srcTileset = nullptr,
+                  const gfx::Point* tilemapPos = nullptr);
 
   void startSelectionTransformation(const gfx::Point& move, double angle);
   void startFlipTransformation(doc::algorithm::FlipType flipType);
@@ -380,6 +383,11 @@ private:
                 const gfx::Rect& gridBounds,
                 const app::Color& color,
                 int alpha);
+  void drawHexGrid(ui::Graphics* g,
+                   const gfx::Rect& spriteBounds,
+                   const doc::Grid& grid,
+                   const app::Color& color,
+                   int alpha);
   void drawSlices(ui::Graphics* g);
   void drawTileNumbers(ui::Graphics* g, const Cel* cel);
   void drawCelBounds(ui::Graphics* g, const Cel* cel, const gfx::Color color);

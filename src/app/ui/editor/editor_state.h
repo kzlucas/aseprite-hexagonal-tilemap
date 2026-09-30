@@ -26,6 +26,7 @@ class TouchMessage;
 } // namespace ui
 
 namespace doc {
+class Grid;
 class Layer;
 class Tag;
 } // namespace doc
@@ -140,6 +141,9 @@ public:
   // Used to adjust the grid origin point for temporal cels created
   // by states like DrawingState + ExpandCelCanvas.
   virtual bool getGridBounds(Editor* editor, gfx::Rect& gridBounds) { return false; }
+
+  // Returns the grid to draw hexagonal tile grids (like getGridBounds())
+  virtual bool getGrid(Editor* editor, doc::Grid& grid) { return false; }
 
   // Called when a layer is going to be removed, e.g. useful in case
   // that the state cached a layer pointer in an internal

@@ -17,6 +17,7 @@
 
 #include "base/base.h"
 #include "doc/algo.h"
+#include "doc/grid.h"
 #include "doc/image.h"
 #include "doc/mask.h"
 #include "doc/primitives.h"
@@ -589,6 +590,53 @@ void floodfill(const Image* image,
       }
     }
   } while (!done);
+}
+
+void hex_floodfill(const Image* tilemap,
+                   const Grid& grid,
+                   const Mask* mask,
+                   const int x,
+                   const int y,
+                   void* data,
+                   AlgoHLine proc)
+{
+  ASSERT(grid.isHexagonal());
+  const gfx::Rect bounds = tilemap->bounds();
+  if (!bounds.contains(x, y))
+    return;
+
+  auto inMask = [&grid, mask](const gfx::Point& tile) {
+    if (!mask)
+      return true;
+    const gfx::Point center = grid.tileToCanvas(tile) + grid.tileCenter();
+    return mask->containsPoint(center.x, center.y);
+  };
+
+  const gfx::Point start(x, y);
+  if (!inMask(start))
+    return;
+
+  const tile_t srcTile = tilemap->getPixel(x, y);
+  std::vector<bool> visited(bounds.w * bounds.h, false);
+  std::vector<gfx::Point> stack;
+  stack.push_back(start);
+  visited[y * bounds.w + x] = true;
+
+  while (!stack.empty()) {
+    const gfx::Point tile = stack.back();
+    stack.pop_back();
+    (*proc)(tile.x, tile.y, tile.x, data);
+
+    for (const gfx::Point& nb : hex_neighbors(tile, grid)) {
+      if (!bounds.contains(nb))
+        continue;
+      const int i = nb.y * bounds.w + nb.x;
+      if (visited[i] || tilemap->getPixel(nb.x, nb.y) != srcTile || !inMask(nb))
+        continue;
+      visited[i] = true;
+      stack.push_back(nb);
+    }
+  }
 }
 
 }} // namespace doc::algorithm

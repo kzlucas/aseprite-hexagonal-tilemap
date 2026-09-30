@@ -13,6 +13,7 @@
 #include "base/serialization.h"
 #include "doc/cancel_io.h"
 #include "doc/grid_io.h"
+#include "doc/grid_properties.h"
 #include "doc/image_io.h"
 #include "doc/string_io.h"
 #include "doc/subobjects_io.h"
@@ -31,7 +32,15 @@ bool write_tileset(std::ostream& os, const Tileset* tileset, CancelIO* cancel)
 {
   write32(os, tileset->id());
   write32(os, tileset->size());
-  write_grid(os, tileset->grid());
+
+  // The type and mask of hexagonal grids are saved in the user data
+  // properties (see tileset_user_data_with_grid()). The mask isn't
+  // saved here because read_grid() would give the new mask image the
+  // same ID of the existing one.
+  Grid grid = tileset->grid();
+  if (grid.isHexagonal())
+    grid.setMask(ImageRef());
+  write_grid(os, grid);
 
   for (tile_index ti = 0; ti < tileset->size(); ++ti) {
     if (cancel && cancel->isCanceled())
@@ -41,7 +50,8 @@ bool write_tileset(std::ostream& os, const Tileset* tileset, CancelIO* cancel)
   }
 
   write8(os, uint8_t(TilesetSerialFormat::LastVer));
-  write_user_data(os, tileset->userData());
+  // The hexagonal grid settings are saved as user data properties
+  write_user_data(os, tileset_user_data_with_grid(tileset));
   write_string(os, tileset->name());
 
   for (tile_index ti = 0; ti < tileset->size(); ++ti) {
@@ -85,6 +95,7 @@ Tileset* read_tileset(std::istream& is,
     if (ver >= TilesetSerialFormat::Ver2) {
       const UserData userData = read_user_data(is, serial);
       tileset->setUserData(userData);
+      apply_tileset_grid_properties(tileset);
 
       if (ver >= TilesetSerialFormat::Ver3) {
         tileset->setName(read_string(is));

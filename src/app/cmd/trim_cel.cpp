@@ -16,7 +16,9 @@
 #include "doc/algorithm/shrink_bounds.h"
 #include "doc/cel.h"
 #include "doc/layer.h"
+#include "doc/layer_tilemap.h"
 #include "doc/sprite.h"
+#include "doc/tileset.h"
 
 namespace app { namespace cmd {
 
@@ -25,12 +27,28 @@ using namespace doc;
 TrimCel::TrimCel(Cel* cel)
 {
   gfx::Rect newBounds = cel->bounds();
+  bool trimmed = false;
 
-  if (algorithm::shrink_cel_bounds(cel, cel->image()->maskColor(), newBounds)) {
+  // Hexagonal tilemaps are trimmed in tiles (keeping the stagger of
+  // the grid)
+  if (cel->layer()->isTilemap() &&
+      static_cast<LayerTilemap*>(cel->layer())->tileset()->grid().isHexagonal()) {
+    gfx::Rect tiles;
+    trimmed =
+      algorithm::shrink_bounds(cel->image(), cel->image()->maskColor(), cel->layer(), tiles);
+    if (trimmed) {
+      Grid grid = cel->grid();
+      tiles = grid.alignTilesToStagger(tiles);
+      if (tiles != cel->image()->bounds())
+        add(new cmd::CropCel(cel, tiles, CropCel::Tiles()));
+    }
+  }
+  else if ((trimmed = algorithm::shrink_cel_bounds(cel, cel->image()->maskColor(), newBounds))) {
     if (cel->bounds() != newBounds)
       add(new cmd::CropCel(cel, newBounds));
   }
-  else {
+
+  if (!trimmed) {
     // Delete the given "cel" and all its links.
     Sprite* sprite = cel->sprite();
     Layer* layer = cel->layer();

@@ -14,6 +14,7 @@
 #include "doc/color.h"
 #include "doc/doc.h"
 #include "doc/frame.h"
+#include "doc/image_ref.h"
 #include "doc/pixel_format.h"
 #include "doc/tile.h"
 #include "gfx/clip.h"
@@ -26,6 +27,7 @@
 
 namespace doc {
 class Cel;
+class Grid;
 class Image;
 class Layer;
 class Palette;
@@ -178,6 +180,15 @@ private:
                                          const tile_flags tileFlags = notile);
 
   bool checkIfWeShouldUsePreview(const Cel* cel) const;
+  void renderHexTilemap(Image* dst_image,
+                        const Image* cel_image,
+                        const Tileset* tileset,
+                        const Grid& grid,
+                        const Palette* pal,
+                        const gfx::Clip& area,
+                        CompositeImageFunc compositeImage,
+                        const int opacity,
+                        const BlendMode blendMode);
 
   int m_flags;
   int m_nonactiveLayersOpacity;
@@ -211,6 +222,18 @@ void composite_image(Image* dst,
                      const int y,
                      const int opacity,
                      const BlendMode blendMode);
+
+// Hexagonal tiles overlap, so they are composed at 1:1 scale in a new
+// image covering the given canvas bounds (in the coordinates of the
+// "grid", which must include the cel position), and then that image
+// can be rendered like a regular cel at any zoom level. Each pixel is
+// taken from the tile that owns it (the tile whose mask contains it)
+// with its flips applied. Returns nullptr if there is nothing to
+// compose. The image has the pixel format of the tile images.
+ImageRef compose_hex_tilemap(const Image* tilemap,
+                             const Tileset* tileset,
+                             const Grid& grid,
+                             const gfx::Rect& canvasBounds);
 
 } // namespace render
 

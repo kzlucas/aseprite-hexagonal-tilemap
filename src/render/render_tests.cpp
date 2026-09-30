@@ -15,12 +15,17 @@
 
 #include "doc/cel.h"
 #include "doc/document.h"
+#include "doc/grid.h"
 #include "doc/image.h"
 #include "doc/layer.h"
+#include "doc/layer_tilemap.h"
 #include "doc/palette.h"
 #include "doc/primitives.h"
+#include "doc/tileset.h"
+#include "doc/tilesets.h"
 
 #include <memory>
+#include <string>
 
 using namespace doc;
 using namespace render;
@@ -245,6 +250,166 @@ TEST(Render, BugWithMultiplesOf3ZoomFactors)
           else {
             EXPECT_EQ(c, rgba(64, 64, 64, 255)) << " zoom=" << zoom << " x=" << x << " y=" << y;
           }
+        }
+      }
+    }
+  }
+}
+
+namespace {
+
+// A tile with a gradient (so flips are visible)
+ImageRef make_gradient_tile(const gfx::Size& sz, const int seed)
+{
+  ImageRef tile(Image::create(IMAGE_RGB, sz.w, sz.h));
+  for (int y = 0; y < sz.h; ++y)
+    for (int x = 0; x < sz.w; ++x)
+      tile->putPixel(
+        x,
+        y,
+        rgba((x * 16 + seed * 40) & 255, (y * 16 + seed * 70) & 255, (seed * 50) & 255, 255));
+  return tile;
+}
+
+// Creates a sprite with a hexagonal tilemap cel at "celPos", and a
+// second sprite with a regular layer with the pixels that the tilemap
+// must render: each canvas pixel is the (flipped) pixel of the tile
+// that owns it.
+void make_hex_sprites(Document* doc,
+                      const Grid& grid,
+                      const gfx::Point& celPos,
+                      Sprite*& hexSprite,
+                      Sprite*& refSprite)
+{
+  const ImageSpec spec(ColorMode::RGB, 96, 72);
+  hexSprite = Sprite::MakeStdSprite(spec);
+  refSprite = Sprite::MakeStdSprite(spec);
+  doc->sprites().add(hexSprite);
+  doc->sprites().add(refSprite);
+
+  auto tileset = new Tileset(hexSprite, grid, 1);
+  for (int i = 1; i <= 5; ++i)
+    tileset->add(make_gradient_tile(grid.tileSize(), i));
+  auto layer = new LayerTilemap(hexSprite, hexSprite->tilesets()->add(tileset));
+  hexSprite->root()->addLayer(layer);
+
+  const tile_flags validFlags = grid.validTileFlags();
+  ImageRef tilemap(Image::create(IMAGE_TILEMAP, 6, 5));
+  for (int v = 0; v < tilemap->height(); ++v) {
+    for (int u = 0; u < tilemap->width(); ++u) {
+      const int i = (u * 3 + v * 2) % 6; // 0 = empty tile
+      tile_flags flags = 0;
+      if ((u + v) % 3 == 0)
+        flags |= tile_f_xflip;
+      if ((u * v) % 4 == 1)
+        flags |= tile_f_yflip;
+      tilemap->putPixel(u, v, tile(i, flags & validFlags));
+    }
+  }
+  auto cel = new Cel(0, tilemap);
+  cel->setPosition(celPos);
+  layer->addCel(cel);
+
+  // The reference is a regular cel with the same bounds of the tilemap cel
+  Grid celGrid = grid;
+  celGrid.origin(celPos);
+  const gfx::Rect celBounds(celPos, grid.tilemapSizeToCanvas(tilemap->size()));
+  ASSERT_EQ(celBounds, cel->bounds());
+  ImageRef refImage(Image::create(IMAGE_RGB, celBounds.w, celBounds.h));
+  clear_image(refImage.get(), 0);
+  auto refLayer = new LayerImage(refSprite);
+  refSprite->root()->addLayer(refLayer);
+  auto refCel = new Cel(0, refImage);
+  refCel->setPosition(celPos);
+  refLayer->addCel(refCel);
+
+  for (int y = celBounds.y; y < celBounds.y2(); ++y) {
+    for (int x = celBounds.x; x < celBounds.x2(); ++x) {
+      const gfx::Point tilePt = celGrid.canvasToTile(gfx::Point(x, y));
+      if (!tilemap->bounds().contains(tilePt))
+        continue;
+      const tile_t t = tilemap->getPixel(tilePt.x, tilePt.y);
+      if (tile_geti(t) == notile)
+        continue;
+      const ImageRef tileImage = tileset->get(tile_geti(t));
+      gfx::Point local = gfx::Point(x, y) - celGrid.tileToCanvas(tilePt);
+      if (tile_getf(t) & tile_f_xflip)
+        local.x = tileImage->width() - 1 - local.x;
+      if (tile_getf(t) & tile_f_yflip)
+        local.y = tileImage->height() - 1 - local.y;
+      refImage->putPixel(x - celPos.x, y - celPos.y, tileImage->getPixel(local.x, local.y));
+    }
+  }
+}
+
+std::string first_difference(const Image* a, const Image* b)
+{
+  for (int y = 0; y < a->height(); ++y)
+    for (int x = 0; x < a->width(); ++x)
+      if (a->getPixel(x, y) != b->getPixel(x, y))
+        return "pixel " + std::to_string(x) + "," + std::to_string(y);
+  return std::string();
+}
+
+} // anonymous namespace
+
+// A hexagonal tilemap must render exactly like a regular layer with
+// the pixels of the tiles that own each canvas pixel, at any zoom
+// level and for any rendered area.
+TEST(Render, HexTilemaps)
+{
+  ImageRef customMask(Image::create(IMAGE_BITMAP, 16, 16));
+  {
+    const int starts[16] = { 6, 4, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 4, 6, 8 };
+    const int ends[16] = { 10, 12, 14, 16, 16, 16, 16, 16, 16, 16, 16, 16, 14, 12, 10, 8 };
+    customMask->clear(0);
+    for (int y = 0; y < 16; ++y)
+      for (int x = starts[y]; x < ends[y]; ++x)
+        customMask->putPixel(x, y, 1);
+  }
+  const Grid grids[] = {
+    Grid::MakeHex(gfx::Size(16, 16), Grid::Type::HexPointyTop),
+    Grid::MakeHex(gfx::Size(14, 12), Grid::Type::HexPointyTop, Grid::Parity::Even, 10),
+    Grid::MakeHex(gfx::Size(16, 16), Grid::Type::HexFlatTop),
+    Grid::MakeHex(gfx::Size(12, 18), Grid::Type::HexFlatTop, Grid::Parity::Even),
+    Grid::MakeHex(gfx::Size(15, 16), Grid::Type::HexPointyTop),
+    Grid::MakeHex(gfx::Size(16, 16), Grid::Type::HexPointyTop, Grid::Parity::Odd, 12, customMask),
+  };
+  const gfx::Point celPositions[] = { gfx::Point(0, 0), gfx::Point(5, -7), gfx::Point(-9, 4) };
+  const Zoom zooms[] = { Zoom(1, 1), Zoom(2, 1), Zoom(3, 1), Zoom(1, 2), Zoom(1, 3) };
+
+  for (const Grid& grid : grids) {
+    for (const gfx::Point& celPos : celPositions) {
+      auto doc = std::make_shared<Document>();
+      Sprite* hexSprite;
+      Sprite* refSprite;
+      make_hex_sprites(doc.get(), grid, celPos, hexSprite, refSprite);
+
+      for (const Zoom& zoom : zooms) {
+        const int w = zoom.apply(96);
+        const int h = zoom.apply(72);
+        // Full sprite and partial areas (scrolled editor)
+        const gfx::Clip areas[] = {
+          gfx::Clip(0, 0, 0, 0, w, h),
+          gfx::Clip(0, 0, zoom.apply(13), zoom.apply(9), zoom.apply(40), zoom.apply(30)),
+          gfx::Clip(3, 2, zoom.apply(31), zoom.apply(27), zoom.apply(17), zoom.apply(19)),
+        };
+        for (const gfx::Clip& area : areas) {
+          std::unique_ptr<Image> hexDst(Image::create(IMAGE_RGB, w, h));
+          std::unique_ptr<Image> refDst(Image::create(IMAGE_RGB, w, h));
+          clear_image(hexDst.get(), 0);
+          clear_image(refDst.get(), 0);
+
+          Render render;
+          render.setProjection(Projection(PixelRatio(1, 1), zoom));
+          render.renderSprite(hexDst.get(), hexSprite, frame_t(0), area);
+          render.renderSprite(refDst.get(), refSprite, frame_t(0), area);
+
+          ASSERT_EQ("", first_difference(refDst.get(), hexDst.get()))
+            << "type=" << int(grid.type()) << " size=" << grid.tileSize().w << "x"
+            << grid.tileSize().h << " parity=" << int(grid.parity()) << " cel=" << celPos.x << ","
+            << celPos.y << " zoom=" << zoom.scale() << " area=" << area.src.x << "," << area.src.y
+            << " " << area.size.w << "x" << area.size.h;
         }
       }
     }

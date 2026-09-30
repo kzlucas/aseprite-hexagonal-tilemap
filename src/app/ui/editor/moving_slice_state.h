@@ -243,6 +243,9 @@ private:
   Site m_site;
   ExtraCelRef m_extraCel = nullptr;
   Tx m_tx;
+  // True if the content of the slices is transformed with the slices
+  // (Editor::slicesTransforms())
+  bool m_transformContent = false;
 };
 
 } // namespace app

@@ -1,0 +1,26 @@
+{ "frames": [
+   {
+    "filename": "pointy-14x12.aseprite",
+    "frame": { "x": 0, "y": 0, "w": 84, "h": 60 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 84, "h": 60 },
+    "sourceSize": { "w": 84, "h": 60 },
+    "duration": 100
+   }
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "image": "pointy-14x12.png",
+  "format": "RGBA8888",
+  "size": { "w": 84, "h": 60 },
+  "scale": "1",
+  "layers": [
+   { "name": "Layer 1", "opacity": 255, "blendMode": "normal" },
+   { "name": "Tilemap 1", "opacity": 255, "blendMode": "normal" }
+  ],
+  "tilesets": [
+   { "index": 0, "name": "", "tileSize": { "w": 14, "h": 12 }, "shape": "hexPointyTop", "parity": "odd", "step": 10, "mask": [".....####.....", "..##########..", "##############", "##############", "##############", "##############", "##############", "##############", "##############", "##############", "..##########..", ".....####....."], "layers": ["Tilemap 1"] }
+  ]
+ }
+}

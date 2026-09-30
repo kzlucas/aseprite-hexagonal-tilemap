@@ -187,6 +187,7 @@ void Tileset::set(const tile_index ti, const ImageRef& image)
 
   removeFromHash(ti, false);
 
+  clearOutsideGridMask(image.get());
   preprocess_transparent_pixels(image.get());
   m_tiles[ti].image = image;
 
@@ -200,6 +201,7 @@ tile_index Tileset::add(const ImageRef& image, const UserData& userData)
   ASSERT(image->width() == m_grid.tileSize().w);
   ASSERT(image->height() == m_grid.tileSize().h);
 
+  clearOutsideGridMask(image.get());
   preprocess_transparent_pixels(image.get());
   m_tiles.push_back(Tile(image, userData));
 
@@ -222,6 +224,7 @@ void Tileset::insert(const tile_index ti, const ImageRef& image, const UserData&
 #endif
 
   ASSERT(ti >= 0 && ti <= m_tiles.size() + 1);
+  clearOutsideGridMask(image.get());
   preprocess_transparent_pixels(image.get());
   m_tiles.insert(m_tiles.begin() + ti, Tile(image, userData));
 
@@ -252,6 +255,11 @@ bool Tileset::operator==(const Tileset& other) const
       m_matchFlags != other.m_matchFlags || m_tiles.size() != other.m_tiles.size())
     return false;
 
+  // Hexagonal grids must match exactly (orthogonal tilesets are
+  // compared by tile size only as before)
+  if ((m_grid.isHexagonal() || other.m_grid.isHexagonal()) && m_grid != other.m_grid)
+    return false;
+
   size_t n = m_tiles.size();
   for (size_t i = 0; i < n; ++i) {
     if (m_tiles[i].image == nullptr && m_tiles[i].image == nullptr)
@@ -266,6 +274,38 @@ bool Tileset::operator==(const Tileset& other) const
   }
 
   return true;
+}
+
+void Tileset::setGrid(const Grid& grid)
+{
+  ASSERT(grid.tileSize() == m_grid.tileSize());
+  ASSERT(grid.origin() == gfx::Point(0, 0));
+
+  m_grid = grid;
+  for (Tile& tile : m_tiles) {
+    if (tile.image) {
+      clearOutsideGridMask(tile.image.get());
+      preprocess_transparent_pixels(tile.image.get());
+    }
+  }
+  rehash();
+}
+
+void Tileset::clearOutsideGridMask(Image* image) const
+{
+  if (!m_grid.isHexagonal() || !m_grid.hasMask())
+    return;
+
+  const Image* mask = m_grid.mask().get();
+  ASSERT(mask->size() == image->size());
+  if (mask->size() != image->size())
+    return;
+
+  const color_t bg = image->maskColor();
+  for (int y = 0; y < image->height(); ++y)
+    for (int x = 0; x < image->width(); ++x)
+      if (!mask->getPixel(x, y))
+        image->putPixel(x, y, bg);
 }
 
 ImageRef Tileset::makeEmptyTile()
@@ -338,8 +378,10 @@ void Tileset::notifyTileContentChange(const tile_index ti)
 
   (void)ti; // unused
 
-  if (ti >= 0 && ti < m_tiles.size() && m_tiles[ti].image)
+  if (ti >= 0 && ti < m_tiles.size() && m_tiles[ti].image) {
+    clearOutsideGridMask(m_tiles[ti].image.get());
     preprocess_transparent_pixels(m_tiles[ti].image.get());
+  }
 
   rehash();
 

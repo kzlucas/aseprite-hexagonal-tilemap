@@ -55,6 +55,11 @@ public:
   Sprite* sprite() const { return m_sprite; }
   const Grid& grid() const { return m_grid; }
 
+  // Changes the grid (the tile size must be the same). In a
+  // hexagonal grid, the pixels outside the mask are cleared in all
+  // tiles (they are always transparent).
+  void setGrid(const Grid& grid);
+
   const std::string& name() const { return m_name; }
   void setName(const std::string& name) { m_name = name; }
 
@@ -141,6 +146,7 @@ public:
 
 private:
   void copyTileset(const Tileset* other);
+  void clearOutsideGridMask(Image* image) const;
   void removeFromHash(const tile_index ti, const bool adjustIndexes);
   void hashImage(const tile_index ti, const ImageRef& tileImage);
   void rehash();

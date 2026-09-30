@@ -23,6 +23,7 @@
 #include "app/ui/status_bar.h"
 #include "app/ui/timeline/timeline.h"
 #include "app/ui/toolbar.h"
+#include "app/util/cel_ops.h"
 #include "base/convert_to.h"
 #include "doc/cel.h"
 #include "doc/cels_range.h"
@@ -36,6 +37,7 @@ class RotateJob : public SpriteJob {
   int m_angle;
   CelList m_cels;
   bool m_rotateSprite;
+  bool m_hexTilemapsNotRotated = false;
 
 public:
   RotateJob(Context* ctx,
@@ -51,6 +53,9 @@ public:
   {
     m_angle = angle;
   }
+
+  // True if there were hexagonal tilemaps that couldn't be rotated
+  bool hexTilemapsNotRotated() const { return m_hexTilemapsNotRotated; }
 
 protected:
   template<typename T>
@@ -82,8 +87,41 @@ protected:
   {
     DocApi api = document()->getApi(tx);
 
-    // 1) Rotate cel positions
+    // 0) Hexagonal tilemaps keep the stagger of their grid, so they
+    //    can be rotated 180 degrees (flipping the positions of their
+    //    tiles) but not 90 degrees
+    CelList cels;
     for (Cel* cel : m_cels) {
+      const doc::Grid grid = cel->grid();
+      if (cel->layer()->isTilemap() && grid.isHexagonal()) {
+        const doc::tile_flags flips = doc::tile_f_xflip | doc::tile_f_yflip;
+        bool rotated = false;
+        if (m_angle == 180 && (grid.validTileFlags() & flips) == flips) {
+          // The flip across the stagger can fail (e.g. staggered
+          // bricks), so it's the first one
+          const bool flat = (grid.type() == doc::Grid::Type::HexFlatTop);
+          if (flip_hex_tilemap_cel(
+                tx,
+                cel,
+                sprite()->bounds(),
+                (flat ? doc::algorithm::FlipVertical : doc::algorithm::FlipHorizontal))) {
+            flip_hex_tilemap_cel(
+              tx,
+              cel,
+              sprite()->bounds(),
+              (flat ? doc::algorithm::FlipHorizontal : doc::algorithm::FlipVertical));
+            rotated = true;
+          }
+        }
+        if (!rotated)
+          m_hexTilemapsNotRotated = true;
+      }
+      else
+        cels.push_back(cel);
+    }
+
+    // 1) Rotate cel positions
+    for (Cel* cel : cels) {
       Image* image = cel->image();
       if (!image)
         continue;
@@ -104,7 +142,7 @@ protected:
 
     // 2) Rotate images
     int i = 0;
-    for (Cel* cel : m_cels) {
+    for (Cel* cel : cels) {
       Image* image = cel->image();
       if (image) {
         ImageRef new_image(Image::create(image->pixelFormat(),
@@ -238,6 +276,9 @@ void RotateCommand::onExecute(Context* context)
       RotateJob job(context, doc, friendlyName(), m_angle, cels, rotateSprite, m_ui);
       job.startJob();
       job.waitJob();
+
+      if (job.hexTilemapsNotRotated() && context->isUIAvailable())
+        StatusBar::instance()->showTip(1000, Strings::statusbar_tips_cannot_rotate_hex_tilemap());
     }
     update_screen_for_document(doc);
   }

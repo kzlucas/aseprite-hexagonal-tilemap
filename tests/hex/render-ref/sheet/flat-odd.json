@@ -1,0 +1,26 @@
+{ "frames": [
+   {
+    "filename": "flat-odd.aseprite",
+    "frame": { "x": 0, "y": 0, "w": 96, "h": 80 },
+    "rotated": false,
+    "trimmed": false,
+    "spriteSourceSize": { "x": 0, "y": 0, "w": 96, "h": 80 },
+    "sourceSize": { "w": 96, "h": 80 },
+    "duration": 100
+   }
+ ],
+ "meta": {
+  "app": "http://www.aseprite.org/",
+  "image": "flat-odd.png",
+  "format": "RGBA8888",
+  "size": { "w": 96, "h": 80 },
+  "scale": "1",
+  "layers": [
+   { "name": "Layer 1", "opacity": 255, "blendMode": "normal" },
+   { "name": "Tilemap 1", "opacity": 255, "blendMode": "normal" }
+  ],
+  "tilesets": [
+   { "index": 0, "name": "", "tileSize": { "w": 16, "h": 16 }, "shape": "hexFlatTop", "parity": "odd", "step": 12, "mask": ["....########....", "...##########...", "...##########...", "..############..", "..############..", ".##############.", ".##############.", "################", "################", ".##############.", ".##############.", "..############..", "..############..", "...##########...", "...##########...", "....########...."], "layers": ["Tilemap 1"] }
+  ]
+ }
+}
